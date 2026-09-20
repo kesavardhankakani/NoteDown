@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: notedown-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: MAX_CONTENT_LENGTH
+        value: "52428800"
