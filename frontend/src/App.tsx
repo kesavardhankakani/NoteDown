@@ -5,7 +5,7 @@ import {
   BookOpen, Download, FileText, Heart, History, Home, LogIn, LogOut, Menu,
   MessageCircle, Search, Trash2, Upload, User, CalendarCheck, Brain, MoreHorizontal,
   X, RefreshCw, ShieldCheck, MapPin, Navigation, ChevronDown, ExternalLink,
-  Clock3, CheckCircle2, CircleAlert, Target, TrendingUp, Zap, ListChecks
+  Clock3, CheckCircle2, CircleAlert, Target, TrendingUp, Zap, ListChecks,Eye,EyeOff
 } from "lucide-react";
 import {
   addFavorite, askNotes, clearSession, createDepartment, createSubject, deleteDepartment,
@@ -92,17 +92,202 @@ function NavButton({ page, active, onClick }: { page: Page; active: boolean; onC
 }
 function label(p: Page) { return ({ home: "Home", subjects: "Subjects", resources: "Resources", history: "History", chat: "AI Notes", attendance: "Attendance", papers: "Question Papers", admin: "Admin" })[p]; }
 function pageIcon(p: Page) { const C: any = { home: Home, subjects: BookOpen, resources: FileText, history: History, chat: MessageCircle, attendance: CalendarCheck, papers: Brain, admin: ShieldCheck }[p]; return <C size={18} />; }
-function MobileBottomNav({ page, nav, admin }: { page: Page; nav: (p: Page) => void; admin: boolean }) {
-  return <nav className="bottom-nav" aria-label="Mobile navigation">
-    {(["home", "subjects", "resources", "attendance"] as Page[]).map(p => <button key={p} className={page === p ? "bottom-item active" : "bottom-item"} onClick={() => nav(p)}>{pageIcon(p)}<span>{label(p)}</span></button>)}
-    <button className={page === "chat" || page === "papers" || page === "history" || page === "admin" ? "bottom-item active" : "bottom-item"} onClick={() => nav("chat")}><MoreHorizontal size={19} /><span>More</span></button>
-  </nav>;
+function MobileBottomNav({
+  page,
+  nav,
+  admin
+}: {
+  page: Page;
+  nav: (p: Page) => void;
+  admin: boolean;
+}) {
+  const items: Page[] = [
+    "home",
+    "subjects",
+    "resources",
+    "attendance",
+    "chat"
+  ];
+
+  return (
+    <nav className="bottom-nav" aria-label="Mobile navigation">
+      {items.map((p) => (
+        <button
+          key={p}
+          type="button"
+          className={
+            page === p
+              ? "bottom-item active"
+              : "bottom-item"
+          }
+          onClick={() => nav(p)}
+          aria-label={label(p)}
+        >
+          {pageIcon(p)}
+          <span>{label(p)}</span>
+        </button>
+      ))}
+    </nav>
+  );
 }
 function Auth({ onLogin }: { onLogin: (u: any) => void }) {
-  const [mode, setMode] = useState<"login" | "register">("login"), [name, setName] = useState(""), [email, setEmail] = useState(""), [password, setPassword] = useState(""), [busy, setBusy] = useState(false), [error, setError] = useState("");
-  async function submit(e: FormEvent) { e.preventDefault(); setError(""); if (!email || password.length < 6 || (mode === "register" && !name)) return setError(mode === "register" ? "Enter name, email and a 6+ character password." : "Enter a valid email and 6+ character password."); setBusy(true); try { const r = mode === "login" ? await login(email, password) : await register(name, email, password); localStorage.setItem("notedown_token", r.token); localStorage.setItem("notedown_user", JSON.stringify(r.user)); onLogin(r.user); } catch (e) { setError(e instanceof Error ? e.message : "Authentication failed"); } finally { setBusy(false); } }
-  return <div className="auth-page"><div className="auth-card"><div className="auth-logo"><BookOpen size={25} /></div><span className="eyebrow">ACADEMIC RESOURCE PLATFORM</span><h1>NoteDown</h1><p>Notes, resources, attendance and study tools in one app.</p><form onSubmit={submit}>{mode === "register" && <input autoComplete="name" placeholder="Full name" value={name} onChange={e => setName(e.target.value)} />}<input autoComplete="email" type="email" placeholder="Email address" value={email} onChange={e => setEmail(e.target.value)} /><input autoComplete={mode === "login" ? "current-password" : "new-password"} type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} />{error && <div className="error">{error}</div>}<button className="primary full" disabled={busy}><LogIn size={17} />{busy ? "Please wait…" : mode === "login" ? "Login" : "Create account"}</button></form><button className="switch" onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }}>{mode === "login" ? "New to NoteDown? Create account" : "Already registered? Login"}</button></div></div>;
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+
+    if (
+      !email ||
+      password.length < 6 ||
+      (mode === "register" && !name)
+    ) {
+      return setError(
+        mode === "register"
+          ? "Enter name, email and a 6+ character password."
+          : "Enter a valid email and 6+ character password."
+      );
+    }
+
+    setBusy(true);
+
+    try {
+      const r =
+        mode === "login"
+          ? await login(email, password)
+          : await register(name, email, password);
+
+      localStorage.setItem("notedown_token", r.token);
+      localStorage.setItem(
+        "notedown_user",
+        JSON.stringify(r.user)
+      );
+
+      onLogin(r.user);
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Authentication failed"
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="auth-page">
+      <div className="auth-card">
+        <div className="auth-logo">
+          <BookOpen size={25} />
+        </div>
+
+        <span className="eyebrow">
+          ACADEMIC RESOURCE PLATFORM
+        </span>
+
+        <h1>NoteDown</h1>
+
+        <p>
+          Notes, resources, attendance and study tools in one app.
+        </p>
+
+        <form onSubmit={submit}>
+          {mode === "register" && (
+            <input
+              autoComplete="name"
+              placeholder="Full name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          )}
+
+          <input
+            autoComplete="email"
+            type="email"
+            placeholder="Email address"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+
+          <div className="password-field">
+            <input
+              autoComplete={
+                mode === "login"
+                  ? "current-password"
+                  : "new-password"
+              }
+              type={showPassword ? "text" : "password"}
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+
+            <button
+              type="button"
+              className="password-toggle"
+              onClick={() =>
+                setShowPassword((value) => !value)
+              }
+              aria-label={
+                showPassword
+                  ? "Hide password"
+                  : "Show password"
+              }
+            >
+              {showPassword ? (
+                <EyeOff size={19} />
+              ) : (
+                <Eye size={19} />
+              )}
+            </button>
+          </div>
+
+          {error && <div className="error">{error}</div>}
+
+          <button
+            className="primary full"
+            disabled={busy}
+          >
+            <LogIn size={17} />
+
+            {busy
+              ? "Please wait…"
+              : mode === "login"
+              ? "Login"
+              : "Create account"}
+          </button>
+        </form>
+
+        <button
+          type="button"
+          className="switch"
+          onClick={() => {
+            setMode(
+              mode === "login"
+                ? "register"
+                : "login"
+            );
+
+            setError("");
+            setShowPassword(false);
+          }}
+        >
+          {mode === "login"
+            ? "New to NoteDown? Create account"
+            : "Already registered? Login"}
+        </button>
+      </div>
+    </div>
+  );
 }
+
 function HomePage({ user, resources, subjects, nav }: { user: UserData; resources: Resource[]; subjects: Subject[]; nav: (p: Page) => void }) {
   return <>
     <section className="hero">
@@ -816,6 +1001,7 @@ function Attendance() {
           {tab === "mark" && (
             <MarkAttendance
               items={timetable}
+              records={records}
               refresh={load}
               locationEnabled={settings.location_enabled}
             />
@@ -1548,76 +1734,93 @@ function TimetablePanel({
 
 function MarkAttendance({
   items,
+  records,
   refresh,
   locationEnabled,
 }: {
   items: Timetable[];
+  records: AttendanceRecord[];
   refresh: () => Promise<void>;
   locationEnabled: boolean;
 }) {
-  const [status, setStatus] = useState<"present" | "absent">("present");
-  const [mode, setMode] = useState<"manual" | "location">("manual");
+  const [date, setDate] = useState(
+    new Date().toISOString().slice(0, 10)
+  );
+
+  const [status, setStatus] =
+    useState<"present" | "absent">("present");
+
+  const [mode, setMode] =
+    useState<"manual" | "location">("manual");
+
+  const [selectedId, setSelectedId] = useState("");
+
   const [location, setLocation] = useState<{
     latitude: number;
     longitude: number;
     accuracy?: number;
   } | null>(null);
+
   const [locating, setLocating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
-  const [, setTick] = useState(0);
 
-  // Keep the screen live so the current class changes automatically.
-  useEffect(() => {
-    const timer = window.setInterval(() => setTick((x) => x + 1), 30_000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const now = new Date();
-  const todayKey = now.toISOString().slice(0, 10);
-  const todayName = now.toLocaleDateString("en-US", {
+  const dayName = new Date(
+    `${date}T12:00:00`
+  ).toLocaleDateString("en-US", {
     weekday: "long",
   });
-  const nowMinutes = now.getHours() * 60 + now.getMinutes();
 
-  function toMinutes(value: string) {
-    const [h, m] = value.split(":").map(Number);
-    return (h || 0) * 60 + (m || 0);
-  }
-
-  const todayClasses = useMemo(
+  const classesForDate = useMemo(
     () =>
       items
-        .filter((x) => x.day_of_week === todayName)
-        .sort((a, b) => a.start_time.localeCompare(b.start_time)),
-    [items, todayName]
+        .filter((x) => x.day_of_week === dayName)
+        .sort((a, b) =>
+          a.start_time.localeCompare(b.start_time)
+        ),
+    [items, dayName]
   );
 
-  const currentClass = useMemo(
+  const selected = useMemo(
     () =>
-      todayClasses.find((x) => {
-        const start = toMinutes(x.start_time);
-        const end = toMinutes(x.end_time);
-        return nowMinutes >= start && nowMinutes < end;
-      }) || null,
-    [todayClasses, nowMinutes]
-  );
-
-  const nextClass = useMemo(
-    () =>
-      todayClasses.find(
-        (x) => toMinutes(x.start_time) > nowMinutes
+      items.find(
+        (x) => x.id === Number(selectedId)
       ) || null,
-    [todayClasses, nowMinutes]
+    [items, selectedId]
   );
 
-  const completedCount = todayClasses.filter(
-    (x) => toMinutes(x.end_time) <= nowMinutes
-  ).length;
+  const selectedRecord = useMemo(
+    () => {
+      if (!selected) return null;
+
+      return (
+        records.find(
+          (r) =>
+            r.timetable_id === selected.id &&
+            r.class_date === date
+        ) || null
+      );
+    },
+    [records, selected, date]
+  );
+
+  useEffect(() => {
+    setSelectedId("");
+
+    if (classesForDate.length === 1) {
+      setSelectedId(
+        String(classesForDate[0].id)
+      );
+    }
+
+    setMsg("");
+  }, [date, classesForDate]);
 
   function fetchLocation() {
     if (!navigator.geolocation) {
-      setMsg("Location is not supported on this device.");
+      setMsg(
+        "Location is not supported on this device."
+      );
       return;
     }
 
@@ -1631,11 +1834,13 @@ function MarkAttendance({
           longitude: p.coords.longitude,
           accuracy: p.coords.accuracy,
         });
+
         setMsg(
           `GPS captured successfully (±${Math.round(
             p.coords.accuracy
           )} m)`
         );
+
         setLocating(false);
       },
       (e) => {
@@ -1644,6 +1849,7 @@ function MarkAttendance({
             ? "Location permission was denied. Manual attendance is still available."
             : "Could not fetch GPS. You can continue with manual attendance."
         );
+
         setLocating(false);
       },
       {
@@ -1654,14 +1860,9 @@ function MarkAttendance({
     );
   }
 
-  async function saveAttendance() {
-    if (!currentClass) {
-      setMsg("There is no active timetable class right now.");
-      return;
-    }
-
-    if (mode === "location" && !location) {
-      fetchLocation();
+  async function saveManualAttendance() {
+    if (!selected) {
+      setMsg("Select a class first.");
       return;
     }
 
@@ -1670,21 +1871,22 @@ function MarkAttendance({
 
     try {
       await markAttendance(
-        (currentClass.subject_id ?? null) as any,
+        (selected.subject_id ?? null) as any,
         status,
-        todayKey,
+        date,
         {
-          mode,
-          latitude: location?.latitude,
-          longitude: location?.longitude,
-          accuracy: location?.accuracy,
+          mode: "manual",
         },
-        currentClass.id
+        selected.id
       );
 
       setMsg(
-        `${currentClass.subject_name || currentClass.label || "Class"}: ${
-          status === "present" ? "Present" : "Absent"
+        `${selected.subject_name ||
+          selected.label ||
+          "Class"}: ${
+          status === "present"
+            ? "Present"
+            : "Absent"
         } marked successfully.`
       );
 
@@ -1701,8 +1903,8 @@ function MarkAttendance({
   }
 
   async function autoCheck() {
-    if (!currentClass) {
-      setMsg("There is no active timetable class right now.");
+    if (!selected) {
+      setMsg("Select a class first.");
       return;
     }
 
@@ -1712,16 +1914,25 @@ function MarkAttendance({
     }
 
     setSaving(true);
-    setMsg("Checking your classroom location…");
+    setMsg("");
 
     try {
+      const now = new Date();
+
       const r = await autoMarkAttendance({
-        timetable_id: currentClass.id,
+        timetable_id: selected.id,
         latitude: location.latitude,
         longitude: location.longitude,
         accuracy: location.accuracy,
-        client_day: todayName,
-        client_time: now.toTimeString().slice(0, 5),
+        client_day: now.toLocaleDateString(
+          "en-US",
+          {
+            weekday: "long",
+          }
+        ),
+        client_time: now
+          .toTimeString()
+          .slice(0, 5),
       });
 
       setMsg(r.message);
@@ -1737,299 +1948,291 @@ function MarkAttendance({
     }
   }
 
-  const title =
-    currentClass?.subject_name ||
-    currentClass?.label ||
-    "No class right now";
-
   return (
-    <div className="attendance-mark-modern">
-      <div className="attendance-current-card">
-        <div className="attendance-current-top">
-          <div>
-            <span className="eyebrow">LIVE ATTENDANCE</span>
-            <h2>
-              {currentClass
-                ? "Are you attending this class?"
-                : "No class is active right now"}
-            </h2>
-            <p>
-              {now.toLocaleDateString("en-US", {
-                weekday: "long",
-                month: "long",
-                day: "numeric",
-              })}{" "}
-              · {now.toLocaleTimeString("en-US", {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </p>
-          </div>
+    <div className="attendance-two-col">
+      <div className="card">
+        <div className="card-title">
+          <CalendarCheck />
 
-          <div className="attendance-live-badge">
-            <span className={currentClass ? "live-dot" : "idle-dot"} />
-            {currentClass ? "CLASS NOW" : "WAITING"}
+          <div>
+            <h3>Mark Attendance</h3>
+
+            <p>
+              Select any class for the chosen day.
+              Manual attendance is not restricted by
+              the timetable time.
+            </p>
           </div>
         </div>
 
-        {currentClass ? (
+        <label>
+          Day
+          <input
+            type="date"
+            value={date}
+            onChange={(e) =>
+              setDate(e.target.value)
+            }
+          />
+        </label>
+
+        <div className="field-label">
+          Attendance method
+        </div>
+
+        <div className="seg">
+          <button
+            type="button"
+            className={
+              mode === "manual"
+                ? "selected"
+                : ""
+            }
+            onClick={() => {
+              setMode("manual");
+              setMsg("");
+            }}
+          >
+            ✋ Manual
+          </button>
+
+          <button
+            type="button"
+            className={
+              mode === "location"
+                ? "selected"
+                : ""
+            }
+            disabled={!locationEnabled}
+            onClick={() => {
+              setMode("location");
+              setMsg("");
+            }}
+          >
+            📍 Automatic
+          </button>
+        </div>
+
+        {mode === "manual" && (
           <>
-            <div className="current-class-main">
-              <div className="current-class-icon">
-                <CalendarCheck size={28} />
-              </div>
-
-              <div className="current-class-info">
-                <h1>{title}</h1>
-                <div className="current-class-meta">
-                  <span>
-                    <Clock3 size={15} />
-                    {currentClass.start_time}–{currentClass.end_time}
-                  </span>
-                  <span>
-                    <MapPin size={15} />
-                    {currentClass.room || "Room not set"}
-                  </span>
-                  {currentClass.faculty && (
-                    <span>
-                      <User size={15} />
-                      {currentClass.faculty}
-                    </span>
-                  )}
-                </div>
-              </div>
+            <div className="field-label">
+              Attendance status
             </div>
 
-            <div className="attendance-question">
-              <span>Mark your attendance</span>
+            <div className="seg">
+              <button
+                type="button"
+                className={
+                  status === "present"
+                    ? "selected"
+                    : ""
+                }
+                onClick={() =>
+                  setStatus("present")
+                }
+              >
+                ✅ Present
+              </button>
 
-              <div className="attendance-choice-grid">
-                <button
-                  type="button"
-                  className={
-                    status === "present"
-                      ? "attendance-choice present selected"
-                      : "attendance-choice present"
-                  }
-                  onClick={() => setStatus("present")}
-                  disabled={saving}
-                >
-                  <CheckCircle2 size={24} />
-                  <span>
-                    <b>Present</b>
-                    <small>I am attending</small>
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  className={
-                    status === "absent"
-                      ? "attendance-choice absent selected"
-                      : "attendance-choice absent"
-                  }
-                  onClick={() => setStatus("absent")}
-                  disabled={saving}
-                >
-                  <CircleAlert size={24} />
-                  <span>
-                    <b>Absent</b>
-                    <small>I am not attending</small>
-                  </span>
-                </button>
-              </div>
+              <button
+                type="button"
+                className={
+                  status === "absent"
+                    ? "selected"
+                    : ""
+                }
+                onClick={() =>
+                  setStatus("absent")
+                }
+              >
+                ❌ Absent
+              </button>
             </div>
+          </>
+        )}
 
-            {locationEnabled && (
-              <div className="attendance-location-box">
-                <div>
-                  <b>
-                    <Navigation size={16} />
-                    Attendance method
-                  </b>
-                  <small>
-                    Use manual marking or verify your classroom location.
-                  </small>
-                </div>
-
-                <div className="seg">
-                  <button
-                    type="button"
-                    className={mode === "manual" ? "selected" : ""}
-                    onClick={() => setMode("manual")}
-                    disabled={saving}
-                  >
-                    ✋ Manual
-                  </button>
-                  <button
-                    type="button"
-                    className={mode === "location" ? "selected" : ""}
-                    onClick={() => setMode("location")}
-                    disabled={saving}
-                  >
-                    📍 Location
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {mode === "location" && locationEnabled && (
-              <div className="location-action-row">
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={fetchLocation}
-                  disabled={locating || saving}
-                >
-                  <Navigation size={16} />
-                  {locating
-                    ? "Getting location…"
-                    : location
-                    ? "Refresh location"
-                    : "Get my location"}
-                </button>
-
-                {location && (
-                  <small>
-                    GPS ±{Math.round(location.accuracy || 0)} m
-                  </small>
-                )}
-
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() => void autoCheck()}
-                  disabled={saving || locating}
-                >
-                  <ShieldCheck size={16} />
-                  Verify & mark automatically
-                </button>
-              </div>
-            )}
+        {mode === "location" && (
+          <div className="location-box">
+            <div>
+              {msg ||
+                "Automatic attendance requires your current GPS location and an active class."}
+            </div>
 
             <button
               type="button"
-              className={
-                status === "present"
-                  ? "primary attendance-submit"
-                  : "attendance-submit attendance-submit-absent"
-              }
-              onClick={() => void saveAttendance()}
-              disabled={saving || (mode === "location" && !location)}
+              className="ghost"
+              onClick={fetchLocation}
+              disabled={locating}
             >
-              {saving ? (
-                <>
-                  <RefreshCw size={17} className="spin" />
-                  Saving…
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 size={17} />
-                  Mark {status === "present" ? "Present" : "Absent"}
-                </>
-              )}
+              {locating
+                ? "Fetching…"
+                : "Fetch current location"}
             </button>
 
-            {msg && (
-              <div className="attendance-message">
-                {msg}
-              </div>
+            {location && (
+              <small>
+                {location.latitude.toFixed(6)},{" "}
+                {location.longitude.toFixed(6)}
+                {" · "}
+                ±
+                {Math.round(
+                  location.accuracy || 0
+                )}
+                m
+              </small>
             )}
-          </>
-        ) : (
-          <div className="attendance-empty-state">
-            <div className="attendance-empty-icon">
-              <Clock3 size={30} />
-            </div>
-            <h3>No class is active at the moment</h3>
-            <p>
-              NoteDown automatically detects the class from your timetable.
-              You do not need to choose a subject.
-            </p>
+          </div>
+        )}
 
-            {nextClass ? (
-              <div className="next-class-card">
-                <span>NEXT CLASS</span>
-                <b>
-                  {nextClass.subject_name ||
-                    nextClass.label ||
-                    "Class"}
-                </b>
-                <small>
-                  {nextClass.start_time}–{nextClass.end_time}
-                  {" · "}
-                  {nextClass.room || "Room not set"}
-                </small>
-              </div>
-            ) : (
-              <p className="form-help">
-                No more classes are scheduled for today.
-              </p>
-            )}
+        {mode === "manual" ? (
+          <button
+            type="button"
+            className="primary full"
+            disabled={!selected || saving}
+            onClick={() =>
+              void saveManualAttendance()
+            }
+          >
+            {saving
+              ? "Saving…"
+              : status === "present"
+              ? "Mark Present"
+              : "Mark Absent"}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="primary full"
+            disabled={!selected || saving}
+            onClick={() => void autoCheck()}
+          >
+            {saving
+              ? "Checking…"
+              : "📍 Check classroom and continue"}
+          </button>
+        )}
+
+        {msg && (
+          <div className="form-help">
+            {msg}
           </div>
         )}
       </div>
 
-      <div className="attendance-day-strip">
-        <div>
-          <b>Today’s timetable</b>
-          <span>
-            {completedCount} completed · {todayClasses.length} scheduled
-          </span>
+      <div className="card">
+        <div className="summary-header">
+          <div>
+            <h3>
+              {dayName}'s Classes
+            </h3>
+
+            <span>
+              {classesForDate.length} classes
+            </span>
+          </div>
         </div>
 
-        <div className="attendance-mini-list">
-          {todayClasses.length ? (
-            todayClasses.map((item) => {
-              const start = toMinutes(item.start_time);
-              const end = toMinutes(item.end_time);
-              const active =
-                nowMinutes >= start && nowMinutes < end;
-              const completed = nowMinutes >= end;
+        <p className="form-help">
+          Select any class below. For manual
+          attendance, the class time is only
+          informational.
+        </p>
+
+        {classesForDate.length ? (
+          <div className="attendance-class-list">
+            {classesForDate.map((x) => {
+              const record =
+                records.find(
+                  (r) =>
+                    r.timetable_id === x.id &&
+                    r.class_date === date
+                );
+
+              const selectedClass =
+                selectedId === String(x.id);
 
               return (
-                <div
-                  key={item.id}
+                <button
+                  type="button"
+                  key={x.id}
                   className={
-                    active
-                      ? "attendance-mini-row active"
-                      : completed
-                      ? "attendance-mini-row completed"
-                      : "attendance-mini-row"
+                    selectedClass
+                      ? "auto-class selected"
+                      : "auto-class"
+                  }
+                  onClick={() =>
+                    setSelectedId(
+                      String(x.id)
+                    )
                   }
                 >
-                  <span className="mini-time">
-                    {item.start_time}
-                  </span>
                   <div>
                     <b>
-                      {item.subject_name ||
-                        item.label ||
+                      {x.subject_name ||
+                        x.label ||
                         "Class"}
                     </b>
+
                     <small>
-                      {item.end_time}
-                      {item.room
-                        ? ` · ${item.room}`
+                      {x.start_time} -{" "}
+                      {x.end_time}
+                      {" · "}
+                      {x.room ||
+                        "Room not set"}
+                      {x.subject_code
+                        ? ` · ${x.subject_code}`
                         : ""}
                     </small>
                   </div>
-                  <span className="mini-status">
-                    {active
-                      ? "Now"
-                      : completed
-                      ? "Done"
-                      : "Upcoming"}
+
+                  <span>
+                    {record?.status ===
+                    "present"
+                      ? "✅ Present"
+                      : record?.status ===
+                        "absent"
+                      ? "❌ Absent"
+                      : x.attendance_mode ===
+                        "AUTO"
+                      ? "📍 Auto"
+                      : "✋ Not marked"}
                   </span>
-                </div>
+                </button>
               );
-            })
-          ) : (
-            <p className="form-help">
-              No timetable entries for {todayName}.
-            </p>
+            })}
+          </div>
+        ) : (
+          <Empty
+            icon={<CalendarCheck />}
+            title="No classes for this day"
+            text="Add or scan your weekly timetable first."
+          />
+        )}
+
+        {selected && (
+          <div className="form-help">
+            Selected:{" "}
+            <b>
+              {selected.subject_name ||
+                selected.label ||
+                "Class"}
+            </b>
+            {" · "}
+            {selected.start_time} -{" "}
+            {selected.end_time}
+          </div>
+        )}
+
+        {selected?.attendance_mode ===
+          "AUTO" &&
+          mode === "manual" && (
+            <div className="form-help">
+              This class supports automatic
+              attendance too. Manual marking is
+              still available without time/GPS
+              restrictions.
+            </div>
           )}
-        </div>
       </div>
     </div>
   );
