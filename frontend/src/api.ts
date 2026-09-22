@@ -1,9 +1,14 @@
+import { Capacitor } from "@capacitor/core";
+import { Filesystem, Directory } from "@capacitor/filesystem";
 const RAW_API_URL =
-  import.meta.env.VITE_API_URL || "http://127.0.0.1:5000";
+  import.meta.env.VITE_API_URL ||
+  "https://notedown-api-2026.onrender.com";
 
 const API_URL = RAW_API_URL
   .replace(/\/+$/, "")
   .replace(/\/api$/, "");
+
+const API = `${API_URL}/api`;
 
 // ============================================================
 // TYPES
@@ -570,8 +575,12 @@ export async function downloadResource(
   id: number,
   filename = "notedown.pdf"
 ) {
-  const token =
-    getToken();
+  const token = getToken();
+
+  const safeFilename =
+    filename
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+      .trim() || "notedown.pdf";
 
   let response: Response;
 
@@ -579,60 +588,233 @@ export async function downloadResource(
     response = await fetch(
       `${API_URL}/api/resources/${id}/download`,
       {
+        method: "GET",
         headers: token
           ? {
-              Authorization:
-                `Bearer ${token}`,
+              Authorization: `Bearer ${token}`,
             }
           : {},
       }
     );
-  } catch {
+  } catch (error) {
+    console.error(
+      "[NoteDown] Download connection error:",
+      error
+    );
+
     throw new Error(
-      "Download failed: check that the NoteDown server is running."
+      "Download failed. Please check your internet connection."
     );
   }
 
   if (!response.ok) {
-    let data: any = {};
+    let errorMessage = `Download failed (${response.status})`;
 
     try {
-      data =
-        await response.json();
-    } catch {}
+      const data = await response.json();
 
-    throw new Error(
-      data?.message ||
-        "Download failed"
-    );
+      errorMessage =
+        data?.message ||
+        data?.error ||
+        errorMessage;
+    } catch {
+      // Response was not JSON.
+    }
+
+    throw new Error(errorMessage);
   }
 
-  const blob =
-    await response.blob();
+  /*
+   * ==========================================================
+   * DETECT REAL NATIVE APP
+   * ==========================================================
+   *
+   * PC Chrome:
+   *     false → normal browser download
+   *
+   * Android APK:
+   *     true → Capacitor Filesystem
+   *
+   * IMPORTANT:
+   * Do NOT use window.Capacitor here.
+   */
+  const isNative =
+    Capacitor.isNativePlatform();
 
-  const url =
-    URL.createObjectURL(blob);
+  /*
+   * ==========================================================
+   * ANDROID / CAPACITOR
+   * ==========================================================
+   */
+  if (isNative) {
+    try {
+      console.log(
+        "[NoteDown] Android download started:",
+        safeFilename
+      );
 
-  const anchor =
-    document.createElement("a");
+      const arrayBuffer =
+        await response.arrayBuffer();
 
-  anchor.href = url;
-  anchor.download =
-    filename;
+      const bytes =
+        new Uint8Array(arrayBuffer);
 
-  document.body.appendChild(
-    anchor
-  );
+      console.log(
+        "[NoteDown] PDF size:",
+        `${(
+          bytes.length /
+          1024 /
+          1024
+        ).toFixed(2)} MB`
+      );
 
-  anchor.click();
+      /*
+       * Convert PDF binary → Base64.
+       *
+       * Chunking prevents stack overflow
+       * for larger PDF files.
+       */
+      let binary = "";
 
-  anchor.remove();
+      const chunkSize = 8192;
 
-  setTimeout(() => {
-    URL.revokeObjectURL(url);
-  }, 1500);
+      for (
+        let offset = 0;
+        offset < bytes.length;
+        offset += chunkSize
+      ) {
+        const chunk =
+          bytes.subarray(
+            offset,
+            Math.min(
+              offset + chunkSize,
+              bytes.length
+            )
+          );
+
+        binary += String.fromCharCode(
+          ...chunk
+        );
+      }
+
+      const base64 =
+        btoa(binary);
+
+      /*
+       * Save to:
+       *
+       * Android
+       * Documents/
+       *    NoteDown/
+       *       filename.pdf
+       */
+      const result =
+        await Filesystem.writeFile({
+          path: `NoteDown/${safeFilename}`,
+          data: base64,
+          directory: Directory.Documents,
+          recursive: true,
+        });
+
+      console.log(
+        "[NoteDown] Android PDF saved:",
+        result.uri
+      );
+
+      alert(
+        `Notes downloaded successfully!\n\n${safeFilename}\n\nSaved in the NoteDown folder inside Documents.`
+      );
+
+      return {
+        success: true,
+        filename: safeFilename,
+        uri: result.uri,
+      };
+
+    } catch (error) {
+      console.error(
+        "[NoteDown] Android save failed:",
+        error
+      );
+
+      throw new Error(
+        "Could not save the PDF on your Android device."
+      );
+    }
+  }
+
+  /*
+   * ==========================================================
+   * PC / NORMAL WEB BROWSER
+   * ==========================================================
+   *
+   * Chrome, Edge, Firefox, etc.
+   */
+  try {
+    const arrayBuffer =
+      await response.arrayBuffer();
+
+    const blob =
+      new Blob(
+        [arrayBuffer],
+        {
+          type:
+            response.headers.get(
+              "content-type"
+            ) ||
+            "application/pdf",
+        }
+      );
+
+    const url =
+      URL.createObjectURL(blob);
+
+    const anchor =
+      document.createElement("a");
+
+    anchor.href = url;
+    anchor.download =
+      safeFilename;
+
+    /*
+     * Add anchor to DOM,
+     * trigger browser download,
+     * then remove it.
+     */
+    document.body.appendChild(anchor);
+
+    anchor.click();
+
+    anchor.remove();
+
+    /*
+     * Release memory after download starts.
+     */
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+    }, 1000);
+
+    console.log(
+      "[NoteDown] Browser download started:",
+      safeFilename
+    );
+
+    return {
+      success: true,
+      filename: safeFilename,
+    };
+
+  } catch (error) {
+    console.error(
+      "[NoteDown] Browser download failed:",
+      error
+    );
+
+    throw new Error(
+      "Could not download the PDF. Please try again."
+    );
+  }
 }
-
 // ============================================================
 // FAVORITES / HISTORY
 // ============================================================

@@ -325,7 +325,7 @@ function Chat() {
   >([]);
   const [sources, setSources] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+ const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 768);
   const suggestions = [
     "Explain this topic from my notes step by step",
     "Teach me this concept like I am preparing for an exam",

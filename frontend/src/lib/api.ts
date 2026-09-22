@@ -1,4 +1,8 @@
-const API = "http://localhost:5000/api";
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  "https://notedown-api-2026.onrender.com";
+
+const API = `${API_URL.replace(/\/+$/, "")}/api`;
 
 export type User = {
   id: number;

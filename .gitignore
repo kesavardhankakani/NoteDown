@@ -1,9 +1,40 @@
+# =========================
+# Backend
+# =========================
 backend/venv/
 backend/.env
 backend/__pycache__/
 backend/**/__pycache__/
+*.pyc
+
+# Backend local uploads
 backend/uploads/*
 !backend/uploads/.gitkeep
+
+# =========================
+# Frontend
+# =========================
 frontend/node_modules/
 frontend/dist/
-*.pyc
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Vite / TypeScript local cache
+frontend/tsconfig.tsbuildinfo
+
+# =========================
+# Capacitor / Android local files
+# =========================
+frontend/android/.gradle/
+frontend/android/build/
+frontend/android/app/build/
+frontend/android/.idea/
+frontend/android/local.properties
+
+# =========================
+# OS / Editor
+# =========================
+.DS_Store
+Thumbs.db
+.vscode/
