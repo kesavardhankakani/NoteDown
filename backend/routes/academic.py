@@ -1230,7 +1230,7 @@ def _ai_config():
 def _call_ai(
     instructions,
     input_text,
-    max_output_tokens=5000,
+    max_output_tokens=1200,
 ):
     cfg = _ai_config()
 
@@ -2333,7 +2333,7 @@ def chat():
         answer = _call_ai(
             instructions,
             prompt,
-            3500,
+            1200,
         )
 
         return jsonify(
