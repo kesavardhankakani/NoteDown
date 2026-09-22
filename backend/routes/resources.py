@@ -15,6 +15,7 @@ from flask_jwt_extended import (
 from werkzeug.utils import secure_filename
 from sqlalchemy import or_
 from supabase import create_client
+import httpx
 
 from extensions import db
 from models import Resource, Subject, DownloadHistory
@@ -411,20 +412,55 @@ def upload_resource():
             }), 400
 
         # -------------------------------------------------
-        # Upload NEW PDF to Supabase
+        # Upload NEW PDF directly to Supabase Storage
+        #
+        # We intentionally use the Storage HTTP API here
+        # instead of storage3.upload().
+        #
+        # This avoids the storage3 2.31.0 error handler that
+        # can mask the real Storage API error.
         # -------------------------------------------------
 
-        supabase.storage.from_(
-            SUPABASE_BUCKET
-        ).upload(
-            storage_path,
-            pdf_bytes,
-            {
-                "content-type": "application/pdf",
-                "cache-control": "3600",
-                "upsert": False,
-            }
+        storage_url = (
+            SUPABASE_URL.rstrip("/")
+            + "/storage/v1/object/"
+            + SUPABASE_BUCKET
+            + "/"
+            + storage_path
         )
+
+        response = httpx.post(
+            storage_url,
+            content=pdf_bytes,
+            headers={
+                "Authorization": (
+                    f"Bearer {SUPABASE_SERVICE_ROLE_KEY}"
+                ),
+                "apikey": SUPABASE_SERVICE_ROLE_KEY,
+                "Content-Type": "application/pdf",
+                "Cache-Control": "max-age=3600",
+                "x-upsert": "false",
+            },
+            timeout=120.0,
+        )
+
+        # -------------------------------------------------
+        # Supabase rejected upload
+        # -------------------------------------------------
+
+        if response.status_code >= 400:
+
+            print(
+                "Supabase upload HTTP error:",
+                response.status_code,
+                response.text
+            )
+
+            return jsonify({
+                "message": "Supabase storage upload failed",
+                "status_code": response.status_code,
+                "error": response.text,
+            }), 502
 
         uploaded_to_supabase = True
 
@@ -469,7 +505,6 @@ def upload_resource():
 
             file_name=original,
 
-            # IMPORTANT:
             # New resources store the Supabase path.
             file_path=storage_path,
 
@@ -494,6 +529,20 @@ def upload_resource():
             "message": "PDF uploaded successfully",
             "resource": resource.to_dict()
         }), 201
+
+    except httpx.RequestError as exc:
+
+        db.session.rollback()
+
+        print(
+            "Supabase HTTP connection error:",
+            exc
+        )
+
+        return jsonify({
+            "message": "Could not connect to Supabase Storage",
+            "error": str(exc)
+        }), 502
 
     except Exception as exc:
 
@@ -641,7 +690,7 @@ def download_resource(resource_id):
         }), 404
 
     # =====================================================
-    # NEW RESOURCE → SUPABASE
+    # NEW RESOURCE -> SUPABASE
     # =====================================================
 
     if is_supabase_storage_path(storage_path):
@@ -678,7 +727,7 @@ def download_resource(resource_id):
         )
 
     # =====================================================
-    # OLD RESOURCE → LOCAL FILE
+    # OLD RESOURCE -> LOCAL FILE
     #
     # We do NOT migrate it.
     # We do NOT modify it.
@@ -876,4 +925,4 @@ def delete_resource(resource_id):
             "message": "Delete failed",
             "error": str(exc)
         }), 500
-
+    
