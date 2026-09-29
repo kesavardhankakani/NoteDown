@@ -2199,3 +2199,344 @@
     max-width: 91%;
   }
 }
+/* =========================================================
+   NOTEDOWN ATTENDANCE + QUESTION PAPER PREDICTOR UI
+   Safe UI-only styles
+   ========================================================= */
+
+/* ---------------------------------------------------------
+   ATTENDANCE CLASS SELECTION
+   --------------------------------------------------------- */
+
+.attendance-class-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  max-height: 470px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.auto-class {
+  width: 100%;
+  border: 1px solid #e0e6ec;
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 13px;
+  text-align: left;
+  transition: 0.15s ease;
+  cursor: pointer;
+}
+
+.auto-class:hover {
+  border-color: #bcc8d4;
+  transform: translateY(-1px);
+}
+
+.auto-class.selected {
+  border-color: #17212d;
+  background: #f4f6f8;
+  box-shadow: 0 0 0 1px #17212d inset;
+}
+
+.auto-class > div {
+  min-width: 0;
+}
+
+.auto-class b {
+  display: block;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.auto-class small {
+  display: block;
+  margin-top: 4px;
+  color: #7a8693;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.auto-class > span {
+  font-size: 11px;
+  font-weight: 850;
+  white-space: nowrap;
+  color: #687585;
+}
+
+
+/* ---------------------------------------------------------
+   QUESTION PAPER PREDICTOR
+   --------------------------------------------------------- */
+
+.paper-lab {
+  display: grid;
+  gap: 16px;
+  max-width: 1120px;
+}
+
+.predictor-form {
+  display: grid;
+  gap: 14px;
+}
+
+.predictor-step {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 13px 14px;
+  background: #f6f8fa;
+  border: 1px solid #e4e9ee;
+  border-radius: 12px;
+}
+
+.predictor-step > span {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #17212d;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 900;
+  flex: none;
+}
+
+.predictor-step h3 {
+  margin: 1px 0 3px;
+  font-size: 14px;
+}
+
+.predictor-step p {
+  margin: 0;
+  color: #788493;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.predictor-form textarea {
+  min-height: 150px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.predictor-form textarea:focus,
+.predictor-form input:focus,
+.predictor-form select:focus {
+  border-color: #8998a8;
+  box-shadow: 0 0 0 3px #17212d10;
+}
+
+.predictor-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.predictor-row label {
+  display: grid;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #596675;
+}
+
+.predictor-run {
+  min-height: 46px;
+}
+
+
+/* ---------------------------------------------------------
+   PREDICTION RESULTS
+   --------------------------------------------------------- */
+
+.prediction-results {
+  display: grid;
+  gap: 14px;
+}
+
+.result-heading {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+}
+
+.result-heading > svg {
+  color: #596879;
+  flex: none;
+  margin-top: 2px;
+}
+
+.result-heading h3 {
+  margin: 0 0 5px;
+}
+
+.result-heading p {
+  margin: 0;
+  color: #687585;
+  line-height: 1.6;
+  font-size: 13px;
+}
+
+
+/* ---------------------------------------------------------
+   UNIT ANALYSIS
+   --------------------------------------------------------- */
+
+.unit-analysis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 12px;
+}
+
+.unit-analysis > div {
+  padding: 13px;
+  border: 1px solid #e2e7ec;
+  border-radius: 11px;
+  background: #f9fafb;
+}
+
+.unit-analysis b {
+  display: block;
+  font-size: 13px;
+}
+
+.unit-analysis span {
+  display: inline-flex;
+  margin-top: 6px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #eef1f4;
+  color: #586777;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.unit-analysis p {
+  margin: 8px 0 0;
+  color: #71808f;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+
+/* ---------------------------------------------------------
+   PREDICTED QUESTIONS
+   --------------------------------------------------------- */
+
+.prediction-questions {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+}
+
+.prediction-questions article {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 11px;
+  padding: 14px;
+  border: 1px solid #e0e6ec;
+  border-radius: 11px;
+  background: #ffffff;
+}
+
+.prediction-questions article:hover {
+  border-color: #c9d2dc;
+}
+
+.q-num {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: #17212d;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.prediction-questions article b {
+  display: block;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.prediction-questions article small {
+  display: block;
+  margin-top: 5px;
+  color: #7a8693;
+  font-size: 10px;
+}
+
+.prediction-questions article p {
+  margin: 7px 0 0;
+  color: #687585;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+
+/* ---------------------------------------------------------
+   IMPORTANT TOPICS
+   --------------------------------------------------------- */
+
+.topic-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.topic-pills span {
+  padding: 7px 9px;
+  border: 1px solid #dfe5ea;
+  border-radius: 999px;
+  background: #f7f9fa;
+  color: #536170;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+
+/* ---------------------------------------------------------
+   STUDY STRATEGY
+   --------------------------------------------------------- */
+
+.strategy-list {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  color: #5e6c7a;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.strategy-list li + li {
+  margin-top: 6px;
+}
+
+
+/* ---------------------------------------------------------
+   MOBILE
+   --------------------------------------------------------- */
+
+@media (max-width: 700px) {
+
+  .predictor-row,
+  .unit-analysis {
+    grid-template-columns: 1fr;
+  }
+
+  .prediction-questions article {
+    grid-template-columns: 30px 1fr;
+  }
+
+  .paper-lab {
+    gap: 12px;
+  }
+
+}

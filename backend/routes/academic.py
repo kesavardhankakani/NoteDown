@@ -1230,7 +1230,7 @@ def _ai_config():
 def _call_ai(
     instructions,
     input_text,
-    max_output_tokens=1200,
+    max_output_tokens=4000,
 ):
     cfg = _ai_config()
 
@@ -1514,13 +1514,13 @@ IMPORTANT:
 2. Then read each day column from left to right.
 3. EVERY day array in "g" MUST contain EXACTLY the same number of cells as "t".
 4. One "g" value = one timetable cell at that exact time slot.
-5. Use -1 for an EMPTY/BREAK/FREE cell if it has no class subject.
+5. Use -1 for an EMPTY, BREAK, FREE, LUNCH, TEA BREAK, or REST cell.
 6. NEVER delete an empty cell and NEVER shift later classes left.
 7. If a class spans multiple time slots, repeat the SAME subject index in each covered slot.
 8. Preserve Monday through Saturday when visible.
 9. Read every visible class/lab/activity. Do not stop after a few rows.
 10. Do not invent text. Unknown room/faculty/code = "".
-11. For breaks/free cells, use a subject entry with type "break" or "free" and repeat its index.
+11. NEVER create timetable entries for Lunch, Tea Break, Break, Interval, Free Period, or any meal/rest period. Use -1 for those cells.
 12. Times must be 24-hour HHMM.
 
 EXACT compact schema:
@@ -1784,6 +1784,33 @@ Definitions:
             if not name and not code:
                 continue
 
+            # ------------------------------------------------------------
+            # FINAL SAFETY FILTER: exclude break/free periods.
+            blocked_names = {
+                "lunch",
+                "tea break",
+                "break",
+                "interval",
+                "free",
+                "free period",
+                "meal break",
+                "recess",
+                "short break",
+            }
+
+            normalized_name = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+            normalized_label = re.sub(
+                r"[^a-z0-9]+", " ", (code or "").lower()
+            ).strip()
+
+            is_blocked = (
+                normalized_name in blocked_names
+                or normalized_label in blocked_names
+                or entry_type in {"break", "free"}
+            )
+            if is_blocked:
+                continue
+
             cleaned_entries.append({
                 "day": day,
                 "start_time": st,
@@ -1793,7 +1820,7 @@ Definitions:
                 "room": room,
                 "faculty": faculty,
                 "type": entry_type,
-                "label": name or code or entry_type.title(),
+                "label": name or code or "Class",
             })
 
     # Merge adjacent identical cells on the same day. This restores labs and
