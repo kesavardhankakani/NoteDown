@@ -12,6 +12,7 @@ except Exception:
     pytesseract = None
 
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 import urllib.request
 import urllib.error
 from flask import Blueprint, jsonify, request
@@ -34,89 +35,144 @@ DAYS = [
     "Sunday",
 ]
 
+APP_TIMEZONE = os.getenv("APP_TIMEZONE", "Asia/Kolkata").strip() or "Asia/Kolkata"
+
+
+def _local_now():
+    """Return application-local time without changing stored DB timestamps."""
+    try:
+        return datetime.now(ZoneInfo(APP_TIMEZONE))
+    except Exception:
+        return datetime.now()
+
 
 def uid():
     return int(get_jwt_identity())
 
 
 def _migrate():
+    """Safely bring legacy timetable/attendance schemas up to the current model.
+
+    This is intentionally additive/non-destructive for PostgreSQL production DBs:
+    missing columns are added, existing rows are preserved, and the legacy
+    NOT NULL subject_id constraint is relaxed because OCR timetable classes do
+    not require a Subject master row.
+    """
     try:
-        insp = inspect(db.engine)
+        engine = db.engine
+        dialect = engine.dialect.name
+        insp = inspect(engine)
         tables = set(insp.get_table_names())
 
+        # ------------------------------------------------------------
+        # ATTENDANCE: add every column used by the current model/route.
+        # ------------------------------------------------------------
         if "attendance" in tables:
-            cols = {c["name"] for c in insp.get_columns("attendance")}
-            adds = {
+            cols = {c["name"]: c for c in insp.get_columns("attendance")}
+            attendance_adds = {
                 "timetable_id": "INTEGER",
                 "method": "VARCHAR(20) DEFAULT 'MANUAL'",
+                "location_mode": "VARCHAR(20) DEFAULT 'manual'",
+                "latitude": "DOUBLE PRECISION",
+                "longitude": "DOUBLE PRECISION",
+                "accuracy": "DOUBLE PRECISION",
                 "marked_at": "TIMESTAMP",
+                "created_at": "TIMESTAMP",
             }
-            with db.engine.begin() as c:
-                for name, definition in adds.items():
+
+            with engine.begin() as conn:
+                for name, definition in attendance_adds.items():
                     if name not in cols:
-                        c.execute(text(f"ALTER TABLE attendance ADD COLUMN {name} {definition}"))
-
-        if "timetables" not in tables:
-            return
-
-        insp = inspect(db.engine)
-        cols = {c["name"]: c for c in insp.get_columns("timetables")}
-
-        # Add the independent OCR fields first.
-        with db.engine.begin() as c:
-            if "subject_code" not in cols:
-                c.execute(text("ALTER TABLE timetables ADD COLUMN subject_code VARCHAR(50)"))
-            if "subject_name" not in cols:
-                c.execute(text("ALTER TABLE timetables ADD COLUMN subject_name VARCHAR(160)"))
-
-        # Old SQLite schemas often have subject_id NOT NULL. SQLite cannot
-        # ALTER that constraint, so rebuild the table once with nullable subject_id.
-        if db.engine.dialect.name == "sqlite":
-            insp = inspect(db.engine)
-            cols = {c["name"]: c for c in insp.get_columns("timetables")}
-            sid = cols.get("subject_id")
-            if sid and not sid.get("nullable", True):
-                with db.engine.begin() as c:
-                    c.execute(text("DROP TABLE IF EXISTS timetables_new"))
-                    c.execute(text("""
-                        CREATE TABLE timetables_new (
-                            id INTEGER PRIMARY KEY,
-                            user_id INTEGER NOT NULL,
-                            subject_id INTEGER,
-                            subject_code VARCHAR(50),
-                            subject_name VARCHAR(160),
-                            day_of_week VARCHAR(12) NOT NULL,
-                            start_time VARCHAR(5) NOT NULL,
-                            end_time VARCHAR(5) NOT NULL,
-                            room VARCHAR(100),
-                            faculty VARCHAR(160),
-                            class_type VARCHAR(20) NOT NULL DEFAULT 'class',
-                            label VARCHAR(160),
-                            latitude FLOAT,
-                            longitude FLOAT,
-                            radius FLOAT DEFAULT 50,
-                            attendance_mode VARCHAR(10) NOT NULL DEFAULT 'MANUAL',
-                            created_at DATETIME,
-                            FOREIGN KEY(user_id) REFERENCES users(id),
-                            FOREIGN KEY(subject_id) REFERENCES subjects(id)
+                        conn.execute(
+                            text(
+                                f"ALTER TABLE attendance ADD COLUMN {name} {definition}"
+                            )
                         )
-                    """))
-                    c.execute(text("""
-                        INSERT INTO timetables_new
-                        (id,user_id,subject_id,subject_code,subject_name,day_of_week,start_time,end_time,room,faculty,class_type,label,latitude,longitude,radius,attendance_mode,created_at)
-                        SELECT id,user_id,subject_id,subject_code,subject_name,day_of_week,start_time,end_time,room,faculty,class_type,label,latitude,longitude,radius,attendance_mode,created_at
-                        FROM timetables
-                    """))
-                    c.execute(text("DROP TABLE timetables"))
-                    c.execute(text("ALTER TABLE timetables_new RENAME TO timetables"))
 
-        elif db.engine.dialect.name == "postgresql":
-            with db.engine.begin() as c:
-                c.execute(text("ALTER TABLE timetables ALTER COLUMN subject_id DROP NOT NULL"))
+                # OCR timetable attendance may legitimately have no Subject row.
+                if dialect == "postgresql":
+                    sid = cols.get("subject_id")
+                    if sid and not sid.get("nullable", True):
+                        conn.execute(
+                            text(
+                                "ALTER TABLE attendance "
+                                "ALTER COLUMN subject_id DROP NOT NULL"
+                            )
+                        )
+
+            # Re-read after additions so subsequent logic sees the real schema.
+            insp = inspect(engine)
+
+        # ------------------------------------------------------------
+        # TIMETABLES: add every independent OCR field used by the model.
+        # ------------------------------------------------------------
+        if "timetables" in tables:
+            insp = inspect(engine)
+            cols = {c["name"]: c for c in insp.get_columns("timetables")}
+            timetable_adds = {
+                "subject_code": "VARCHAR(50)",
+                "subject_name": "VARCHAR(160)",
+                "class_type": "VARCHAR(20) DEFAULT 'class'",
+                "label": "VARCHAR(160)",
+                "latitude": "DOUBLE PRECISION",
+                "longitude": "DOUBLE PRECISION",
+                "radius": "DOUBLE PRECISION DEFAULT 50",
+                "attendance_mode": "VARCHAR(10) DEFAULT 'MANUAL'",
+                "created_at": "TIMESTAMP",
+            }
+
+            with engine.begin() as conn:
+                for name, definition in timetable_adds.items():
+                    if name not in cols:
+                        conn.execute(
+                            text(
+                                f"ALTER TABLE timetables ADD COLUMN {name} {definition}"
+                            )
+                        )
+
+                if dialect == "postgresql":
+                    sid = cols.get("subject_id")
+                    if sid and not sid.get("nullable", True):
+                        conn.execute(
+                            text(
+                                "ALTER TABLE timetables "
+                                "ALTER COLUMN subject_id DROP NOT NULL"
+                            )
+                        )
+
+            # Give newly-added legacy rows safe defaults without overwriting
+            # existing user data.
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE timetables "
+                        "SET class_type = 'class' "
+                        "WHERE class_type IS NULL OR TRIM(class_type) = ''"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "UPDATE timetables "
+                        "SET attendance_mode = 'MANUAL' "
+                        "WHERE attendance_mode IS NULL OR TRIM(attendance_mode) = ''"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "UPDATE timetables SET radius = 50 WHERE radius IS NULL"
+                    )
+                )
 
     except Exception as exc:
-        db.session.rollback()
-        print(f"Database migration warning: {exc}")
+        # Never hide the actual schema problem during local testing. The
+        # exception is logged and the request will still return a JSON error
+        # from the endpoint that attempted the DB operation.
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        print(f"DATABASE MIGRATION ERROR: {exc!r}")
+        raise RuntimeError(f"Database schema migration failed: {exc}") from exc
 
 def _summary(user_id):
     """Attendance summary that works for both linked and OCR/manual subjects."""
@@ -219,6 +275,194 @@ def _settings(user_id):
 
 def _parse_time(value):
     return datetime.strptime(value, "%H:%M").time()
+
+
+NON_ATTENDANCE_LABELS = {
+    "lunch",
+    "tea break",
+    "break",
+    "interval",
+    "free",
+    "free period",
+    "meal break",
+    "recess",
+    "short break",
+    "library",
+    "activity",
+}
+
+
+def _normalize_day_name(value):
+    raw = str(value or "").strip().lower()
+    mapping = {
+        "mon": "Monday",
+        "monday": "Monday",
+        "tue": "Tuesday",
+        "tues": "Tuesday",
+        "tuesday": "Tuesday",
+        "wed": "Wednesday",
+        "weds": "Wednesday",
+        "wednesday": "Wednesday",
+        "thu": "Thursday",
+        "thur": "Thursday",
+        "thurs": "Thursday",
+        "thursday": "Thursday",
+        "fri": "Friday",
+        "friday": "Friday",
+        "sat": "Saturday",
+        "saturday": "Saturday",
+        "sun": "Sunday",
+        "sunday": "Sunday",
+    }
+    return mapping.get(raw, str(value or "").strip().title())
+
+
+def _validate_vision_grid(payload):
+    if not isinstance(payload, dict):
+        raise ValueError("OCR response was not a JSON object.")
+
+    subjects = payload.get("subjects") if "subjects" in payload else payload.get("s") or []
+    grid = payload.get("grid") if "grid" in payload else payload.get("g") or []
+
+    if not isinstance(subjects, list) or not isinstance(grid, list):
+        raise ValueError("OCR response is missing the required subjects/grid payload.")
+
+    normalized_subjects = []
+    seen_ids = set()
+    for index, subject in enumerate(subjects):
+        if not isinstance(subject, dict):
+            raise ValueError("A timetable subject entry is malformed.")
+
+        raw_id = subject.get("id", index + 1)
+        try:
+            subject_id = int(raw_id)
+        except (TypeError, ValueError):
+            raise ValueError("OCR subject IDs must be integers.")
+        if subject_id < 1:
+            raise ValueError("OCR subject IDs must start at 1.")
+        if subject_id in seen_ids:
+            raise ValueError("OCR subject IDs are duplicated.")
+        seen_ids.add(subject_id)
+
+        code = str(subject.get("code") or "").strip().upper()
+        name = str(subject.get("name") or subject.get("label") or "").strip()
+        subject_type = str(subject.get("type") or "class").strip().lower()
+        if subject_type not in {"class", "lab", "activity", "break", "free", "other"}:
+            subject_type = "class"
+
+        if not code and not name:
+            continue
+
+        normalized_subjects.append({
+            "id": subject_id,
+            "code": code,
+            "name": name,
+            "type": subject_type,
+        })
+
+    if not normalized_subjects:
+        raise ValueError("No timetable subjects were detected.")
+
+    if len(grid) != 6:
+        raise ValueError("OCR response must contain exactly 6 day rows.")
+
+    valid_subject_ids = {int(subject["id"]) for subject in normalized_subjects}
+
+    for row in grid:
+        if not isinstance(row, list) or len(row) != 9:
+            raise ValueError("Each OCR day row must contain exactly 9 periods.")
+        for cell in row:
+            if cell == -1:
+                continue
+            try:
+                subject_id = int(cell)
+            except (TypeError, ValueError):
+                raise ValueError("Grid cells must be integers or -1.")
+            if subject_id < -1 or subject_id not in valid_subject_ids:
+                raise ValueError("OCR grid references a subject ID that does not exist.")
+
+    return {
+        "days": DAYS[:6],
+        "subjects": normalized_subjects,
+        "grid": grid,
+    }
+
+
+def _validate_vision_entries(payload):
+    if not isinstance(payload, dict) or not isinstance(payload.get("entries"), list):
+        raise ValueError("OCR response must contain a timetable entries list.")
+
+    entries = []
+    warnings = []
+    allowed_types = {"class", "lab", "activity", "break", "free", "library", "other"}
+
+    for index, raw in enumerate(payload["entries"]):
+        if not isinstance(raw, dict):
+            warnings.append(f"Entry {index + 1}: malformed extraction was ignored.")
+            continue
+
+        day = _normalize_day_name(raw.get("day"))
+        if day not in DAYS:
+            warnings.append(f"Entry {index + 1}: unrecognized day was ignored.")
+            continue
+
+        start = str(raw.get("start_time") or "").strip()
+        end = str(raw.get("end_time") or "").strip()
+        try:
+            start = _parse_time(start).strftime("%H:%M")
+            end = _parse_time(end).strftime("%H:%M")
+            if _parse_time(start) >= _parse_time(end):
+                raise ValueError
+        except (TypeError, ValueError):
+            warnings.append(f"{day}: invalid or unreadable time was ignored.")
+            continue
+
+        code = str(raw.get("subject_code") or "").strip().upper()
+        name = str(raw.get("subject_name") or raw.get("label") or "").strip()
+        room = str(raw.get("room") or "").strip()
+        faculty = str(raw.get("faculty") or "").strip()
+        if not code and not name:
+            warnings.append(f"{day} {start}-{end}: missing subject was ignored.")
+            continue
+
+        entry_type = str(raw.get("type") or "class").strip().lower()
+        if entry_type not in allowed_types:
+            entry_type = "class"
+        if (
+            entry_type == "class"
+            and (code.endswith("L") or re.search(r"\blab(?:oratory)?\b", f"{name} {room}", re.I))
+        ):
+            entry_type = "lab"
+
+        normalized_name = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+        if entry_type in {"break", "free", "library", "activity"} or normalized_name in NON_ATTENDANCE_LABELS:
+            warnings.append(f"{day} {start}-{end}: non-class period was ignored.")
+            continue
+
+        entry = {
+            "day": day,
+            "start_time": start,
+            "end_time": end,
+            "subject_code": code,
+            "subject_name": name,
+            "room": room,
+            "faculty": faculty,
+            "type": entry_type,
+            "label": str(raw.get("label") or name or code or "Class").strip(),
+        }
+        confidence = raw.get("confidence")
+        try:
+            if confidence is not None:
+                entry["confidence"] = max(0.0, min(1.0, float(confidence)))
+        except (TypeError, ValueError):
+            pass
+        entries.append(entry)
+
+    day_order = {day: index for index, day in enumerate(DAYS)}
+    entries.sort(key=lambda entry: (day_order[entry["day"]], entry["start_time"], entry["end_time"]))
+    if not entries:
+        raise ValueError("No valid class entries were detected. Check the image and scan again.")
+    return {"entries": entries, "warnings": warnings}
 
 
 def _distance_m(lat1, lon1, lat2, lon2):
@@ -568,72 +812,73 @@ def delete_timetable(tid):
 @jwt_required()
 def mark_attendance():
     """
-    Mark attendance for a timetable class.
+    Save attendance for one exact timetable class and date.
 
-    timetable_id is the primary identity. subject_id is optional so OCR/manual
-    timetable classes with no Subject master record still work.
+    timetable_id is the primary identity. subject_id is optional because
+    OCR/manual timetable classes do not need a row in the Subject master table.
     """
-    _migrate()
     u = uid()
     d = request.get_json(silent=True) or {}
 
-    status = str(d.get("status") or "").lower().strip()
-    if status not in {"present", "absent", "cancelled"}:
-        return jsonify({"message": "Choose Present or Absent."}), 400
-
     try:
-        class_date = date.fromisoformat(
-            str(d.get("class_date") or date.today().isoformat())[:10]
-        )
-    except Exception:
-        return jsonify({"message": "Invalid class date."}), 400
+        _migrate()
 
-    tid = d.get("timetable_id")
-    t = None
-    if tid not in (None, "", 0, "0"):
+        status = str(d.get("status") or "").lower().strip()
+        if status not in {"present", "absent", "cancelled"}:
+            return jsonify({"message": "Choose Present or Absent."}), 400
+
         try:
-            t = (
-                Timetable.query
-                .filter_by(id=int(tid), user_id=u)
-                .first()
+            class_date = date.fromisoformat(
+                str(d.get("class_date") or _local_now().date().isoformat())[:10]
             )
         except Exception:
-            t = None
+            return jsonify({"message": "Invalid class date."}), 400
 
+        tid = d.get("timetable_id")
+        if tid in (None, "", 0, "0"):
+            return jsonify({"message": "A timetable class is required."}), 400
+
+        try:
+            tid = int(tid)
+        except Exception:
+            return jsonify({"message": "Invalid timetable class."}), 400
+
+        t = Timetable.query.filter_by(id=tid, user_id=u).first()
         if not t:
             return jsonify({"message": "Timetable class not found."}), 404
 
-    sid = None
-    if t:
+        # Lunch/break/free rows must never receive attendance.
+        if not _is_attendance_class(t):
+            return jsonify({"message": "Break, lunch, free, activity, and library periods cannot receive attendance."}), 400
+
         sid = t.subject_id
-    elif d.get("subject_id") not in (None, "", 0, "0"):
+        if sid is None and d.get("subject_id") not in (None, "", 0, "0"):
+            try:
+                candidate = db.session.get(Subject, int(d["subject_id"]))
+                if candidate:
+                    sid = candidate.id
+            except Exception:
+                pass
+
+        mode = str(d.get("location_mode") or "manual").lower()
+        if mode not in {"manual", "location"}:
+            mode = "manual"
+
+        def as_float(value):
+            if value in (None, ""):
+                return None
+            return float(value)
+
         try:
-            sid = int(d["subject_id"])
+            lat = as_float(d.get("latitude"))
+            lon = as_float(d.get("longitude"))
+            acc = as_float(d.get("accuracy"))
         except Exception:
-            sid = None
+            return jsonify({"message": "Invalid location coordinates."}), 400
 
-    # Backward compatibility: old UI can still mark a linked Subject directly.
-    if not t and sid is not None and not db.session.get(Subject, sid):
-        return jsonify({"message": "Subject not found."}), 404
-
-    mode = str(d.get("location_mode") or "manual").lower()
-    if mode not in {"manual", "location"}:
-        mode = "manual"
-
-    lat = d.get("latitude")
-    lon = d.get("longitude")
-    acc = d.get("accuracy")
-    try:
-        lat = float(lat) if lat is not None else None
-        lon = float(lon) if lon is not None else None
-        acc = float(acc) if acc is not None else None
-    except Exception:
-        return jsonify({"message": "Invalid location coordinates"}), 400
-
-    # Find by timetable first. This prevents two classes of the same subject
-    # on the same day from overwriting each other.
-    if t:
-        r = (
+        # Never identify a record only by subject. Two timetable rows can
+        # legitimately contain the same subject on the same day.
+        record = (
             Attendance.query
             .filter_by(
                 user_id=u,
@@ -642,46 +887,50 @@ def mark_attendance():
             )
             .first()
         )
-    else:
-        q = (
-            Attendance.query
-            .filter_by(
+
+        if record is None:
+            record = Attendance(
                 user_id=u,
-                class_date=class_date,
                 subject_id=sid,
+                timetable_id=t.id,
+                class_date=class_date,
             )
-        )
-        r = q.first()
+            db.session.add(record)
 
-    if not r:
-        r = Attendance(
-            user_id=u,
-            subject_id=sid,
-            timetable_id=t.id if t else None,
-            class_date=class_date,
-        )
-        db.session.add(r)
+        record.subject_id = sid
+        record.timetable_id = t.id
+        record.status = status
+        record.method = "AUTO" if mode == "location" else "MANUAL"
+        record.location_mode = mode
+        record.latitude = lat
+        record.longitude = lon
+        record.accuracy = acc
+        record.marked_at = datetime.utcnow()
 
-    r.subject_id = sid
-    if t:
-        r.timetable_id = t.id
+        db.session.commit()
 
-    r.status = status
-    r.method = "AUTO" if mode == "location" else "MANUAL"
-    r.location_mode = mode
-    r.latitude = lat
-    r.longitude = lon
-    r.accuracy = acc
-    r.marked_at = datetime.utcnow()
+        return jsonify({
+            "message": "Attendance saved",
+            "record": record.to_dict(),
+            "summary": _summary(u),
+        })
 
-    db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        print(f"ATTENDANCE SAVE ERROR: {exc!r}")
+        return jsonify({
+            "message": "Could not save attendance. Please try again.",
+        }), 500
 
-    return jsonify({
-        "message": "Attendance saved",
-        "record": r.to_dict(),
-        "summary": _summary(u),
-    })
 
+def _is_attendance_class(t):
+    """Return False for non-teaching timetable blocks."""
+    typ = (t.class_type or "class").strip().lower()
+    label = (t.label or t.subject_name or "").strip().lower()
+    normalized = re.sub(r"[^a-z0-9]+", " ", label).strip()
+    if typ in {"break", "free", "activity", "library"}:
+        return False
+    return normalized not in NON_ATTENDANCE_LABELS
 
 
 def _entry_dict_for_user(t, class_date, attendance=None, now_time=None):
@@ -716,7 +965,7 @@ def _entry_dict_for_user(t, class_date, attendance=None, now_time=None):
 
 def _current_timetable_classes(user_id, when=None):
     """Return today's timetable in time order with attendance state."""
-    when = when or datetime.now()
+    when = when or _local_now()
     today = when.date()
     day = when.strftime("%A")
     current_time = when.time()
@@ -756,7 +1005,7 @@ def _current_timetable_classes(user_id, when=None):
         item["is_finished"] = current_time >= end
         item["is_upcoming"] = current_time < start
 
-        if item["is_active"] and current is None:
+        if item["is_active"] and current is None and _is_attendance_class(t):
             current = item
 
         items.append(item)
@@ -775,7 +1024,7 @@ def get_current_attendance_class():
     Present/Absent state without requiring a Subject master record.
     """
     u = uid()
-    now = datetime.now()
+    now = _local_now()
     current, today_items = _current_timetable_classes(u, now)
 
     # Show the next few classes that have not finished.
@@ -793,7 +1042,7 @@ def get_current_attendance_class():
         "needs_marking": bool(
             current
             and not current["attendance_marked"]
-            and current["class_type"] not in {"break", "free"}
+            and current["class_type"] not in {"break", "free", "activity", "library"}
         ),
     })
 
@@ -802,7 +1051,7 @@ def get_current_attendance_class():
 @jwt_required()
 def get_today_timetable():
     u = uid()
-    now = datetime.now()
+    now = _local_now()
     _, items = _current_timetable_classes(u, now)
 
     return jsonify({
@@ -818,86 +1067,122 @@ def get_today_timetable():
 @academic_bp.post("/attendance/auto")
 @jwt_required()
 def auto_attendance():
-    """
-    Automatic timetable-based attendance.
-
-    This endpoint does NOT silently mark Present. It only verifies the active
-    timetable class and returns it to the UI. The UI then asks the student
-    Present/Absent and calls POST /attendance.
-    """
+    """Verify the active class and mark Present when classroom GPS matches."""
     u = uid()
     d = request.get_json(silent=True) or {}
-
-    now = datetime.now()
-
-    if d.get("timetable_id"):
-        try:
-            t = (
-                Timetable.query
-                .filter_by(id=int(d["timetable_id"]), user_id=u)
-                .first()
-            )
-        except Exception:
-            t = None
-    else:
-        current, _ = _current_timetable_classes(u, now)
-        t = (
-            Timetable.query
-            .filter_by(id=current["timetable_id"], user_id=u).first()
-            if current else None
-        )
-
-    if not t:
-        return jsonify({
-            "active": False,
-            "needs_marking": False,
-            "message": "No timetable class is active right now.",
-        })
+    now = _local_now()
 
     try:
+        tid = d.get("timetable_id")
+        t = None
+        if tid not in (None, "", 0, "0"):
+            t = Timetable.query.filter_by(id=int(tid), user_id=u).first()
+        if not t:
+            current, _ = _current_timetable_classes(u, now)
+            if current:
+                t = Timetable.query.filter_by(id=current["timetable_id"], user_id=u).first()
+
+        if not t:
+            return jsonify({"active": False, "needs_marking": False, "within_radius": False,
+                            "message": "No timetable class is active right now."})
+
+        if not _is_attendance_class(t):
+            return jsonify({"active": False, "needs_marking": False, "within_radius": False,
+                            "message": "This timetable block is not an attendance class."})
+
         active = (
             t.day_of_week == now.strftime("%A")
             and _parse_time(t.start_time) <= now.time() < _parse_time(t.end_time)
         )
-    except Exception:
-        active = False
+        if not active:
+            return jsonify({
+                "active": False,
+                "needs_marking": False,
+                "within_radius": False,
+                "message": f"Class is not active now. {t.day_of_week} {t.start_time}-{t.end_time}",
+            })
 
-    if not active:
-        return jsonify({
-            "active": False,
-            "needs_marking": False,
-            "message": (
-                f"Class is not active now. "
-                f"{t.day_of_week} {t.start_time}-{t.end_time}"
-            ),
-        })
+        existing = Attendance.query.filter_by(
+            user_id=u, timetable_id=t.id, class_date=now.date()
+        ).first()
+        if existing:
+            return jsonify({
+                "active": True,
+                "needs_marking": False,
+                "within_radius": True,
+                "already_marked": True,
+                "record": existing.to_dict(),
+                "message": f"Attendance already marked {existing.status}.",
+            })
 
-    existing = (
-        Attendance.query
-        .filter_by(
+        # Automatic attendance requires a saved classroom location. This is
+        # intentionally explicit; it must never silently bypass GPS.
+        if t.latitude is None or t.longitude is None:
+            return jsonify({
+                "active": True,
+                "needs_marking": True,
+                "within_radius": False,
+                "message": "Classroom location is not configured for this class. Use Manual attendance or save the classroom location first.",
+            }), 400
+
+        try:
+            user_lat = float(d.get("latitude"))
+            user_lon = float(d.get("longitude"))
+            accuracy = float(d.get("accuracy")) if d.get("accuracy") is not None else None
+        except Exception:
+            return jsonify({
+                "active": True,
+                "needs_marking": True,
+                "within_radius": False,
+                "message": "Current GPS location is required for automatic attendance.",
+            }), 400
+
+        radius = float(t.radius or _settings(u).default_radius or 50)
+        distance = _distance_m(float(t.latitude), float(t.longitude), user_lat, user_lon)
+        within = distance <= radius
+
+        if not within:
+            return jsonify({
+                "active": True,
+                "needs_marking": True,
+                "within_radius": False,
+                "distance_m": round(distance, 1),
+                "radius_m": round(radius, 1),
+                "message": f"You are outside the classroom radius ({round(distance)} m away; allowed {round(radius)} m).",
+            }), 403
+
+        record = Attendance(
             user_id=u,
+            subject_id=t.subject_id,
             timetable_id=t.id,
             class_date=now.date(),
+            status="present",
+            method="AUTO",
+            location_mode="location",
+            latitude=user_lat,
+            longitude=user_lon,
+            accuracy=accuracy,
+            marked_at=datetime.utcnow(),
         )
-        .first()
-    )
+        db.session.add(record)
+        db.session.commit()
 
-    payload = _entry_dict_for_user(t, now.date(), existing, now.time())
-    payload["is_active"] = True
+        return jsonify({
+            "active": True,
+            "needs_marking": False,
+            "within_radius": True,
+            "already_marked": False,
+            "distance_m": round(distance, 1),
+            "radius_m": round(radius, 1),
+            "record": record.to_dict(),
+            "summary": _summary(u),
+            "message": "Attendance marked Present successfully.",
+        })
 
-    return jsonify({
-        "active": True,
-        "needs_marking": (
-            not existing
-            and t.class_type not in {"break", "free"}
-        ),
-        "class": payload,
-        "message": (
-            "Current class found. Ask the student to choose Present or Absent."
-            if not existing
-            else f"Attendance already marked {existing.status}."
-        ),
-    })
+    except Exception as exc:
+        db.session.rollback()
+        print(f"AUTO ATTENDANCE ERROR: {exc!r}")
+        return jsonify({"message": "Could not save automatic attendance."}), 500
 
 
 # ============================================================
@@ -956,7 +1241,7 @@ def scan_timetable():
             }
         )
 
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         return jsonify(
             {"message": str(exc)}
         ), 503
@@ -970,23 +1255,105 @@ def scan_timetable():
 @academic_bp.post("/timetable/import")
 @jwt_required()
 def import_timetable():
+    """Safely import reviewed OCR/manual timetable entries.
+
+    Validation happens BEFORE replace_existing deletes anything. Therefore a
+    malformed OCR response can never wipe a user's existing timetable.
+    """
     u = uid()
     _migrate()
 
     d = request.get_json(silent=True) or {}
-    entries = d.get("entries") or []
-
-    if not isinstance(entries, list) or not entries:
-        return jsonify({"message": "No timetable entries were supplied."}), 400
-
+    raw_entries = d.get("entries") or []
     replace = bool(d.get("replace_existing", False))
 
-    try:
-        if replace:
-            Timetable.query.filter_by(user_id=u).delete(synchronize_session=False)
+    if not isinstance(raw_entries, list) or not raw_entries:
+        return jsonify({"message": "No timetable entries were supplied."}), 400
 
-        # Subject matching is OPTIONAL. A timetable never depends on
-        # Department/Subject master data anymore.
+    def clean_day(value):
+        raw = str(value or "").strip().lower()
+        mapping = {
+            "mon": "Monday", "monday": "Monday",
+            "tue": "Tuesday", "tues": "Tuesday", "tuesday": "Tuesday",
+            "wed": "Wednesday", "weds": "Wednesday", "wednesday": "Wednesday",
+            "thu": "Thursday", "thur": "Thursday", "thurs": "Thursday", "thursday": "Thursday",
+            "fri": "Friday", "friday": "Friday",
+            "sat": "Saturday", "saturday": "Saturday",
+            "sun": "Sunday", "sunday": "Sunday",
+        }
+        return mapping.get(raw)
+
+    blocked_names = {
+        "lunch", "tea break", "break", "interval", "free", "free period",
+        "meal break", "recess", "short break",
+    }
+    allowed_types = {"class", "lab", "break", "free", "library", "activity", "other"}
+
+    # Build a fully validated copy first. No DB mutation occurs here.
+    valid_entries = []
+    skipped = []
+
+    for i, raw in enumerate(raw_entries):
+        if not isinstance(raw, dict):
+            skipped.append({"index": i, "reason": "Invalid entry"})
+            continue
+
+        typ = str(raw.get("type") or "class").strip().lower()
+        if typ not in allowed_types:
+            typ = "class"
+
+        day = clean_day(raw.get("day"))
+        start = str(raw.get("start_time") or "").strip()
+        end = str(raw.get("end_time") or "").strip()
+        code = str(raw.get("subject_code") or "").strip().upper()
+        name = str(raw.get("subject_name") or raw.get("label") or "").strip()
+        room = str(raw.get("room") or "").strip()
+        faculty = str(raw.get("faculty") or "").strip()
+
+        # Never allow combined day/type garbage from an OCR/UI response.
+        if not day:
+            skipped.append({"index": i, "reason": "Invalid day", "entry": raw})
+            continue
+        try:
+            if _parse_time(start) >= _parse_time(end):
+                raise ValueError
+        except Exception:
+            skipped.append({"index": i, "reason": "Invalid time range", "entry": raw})
+            continue
+
+        normalized_name = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+        if typ in {"break", "free"} or normalized_name in blocked_names:
+            skipped.append({"index": i, "reason": "Break/free period ignored", "entry": raw})
+            continue
+
+        if not code and not name:
+            skipped.append({"index": i, "reason": "Missing subject/class name", "entry": raw})
+            continue
+
+        valid_entries.append({
+            "day": day,
+            "start_time": start,
+            "end_time": end,
+            "subject_code": code,
+            "subject_name": name,
+            "room": room,
+            "faculty": faculty,
+            "class_type": typ,
+            "label": str(raw.get("label") or name or code or "Class").strip(),
+        })
+
+    if not valid_entries:
+        return jsonify({
+            "message": "No valid class entries were found. Existing timetable was not changed.",
+            "created": 0,
+            "skipped": len(skipped),
+            "skipped_entries": skipped,
+            "timetables": [],
+        }), 400
+
+    try:
+        # Optional Subject matching. Timetable rows remain independent when a
+        # master Subject does not exist.
         subjects = Subject.query.all()
 
         def normalize(value):
@@ -1002,90 +1369,80 @@ def import_timetable():
         by_name = {}
         for subject in subjects:
             if subject.code:
-                code = normalize_code(subject.code)
-                if code:
-                    by_code[code] = subject
+                key = normalize_code(subject.code)
+                if key:
+                    by_code[key] = subject
             if subject.name:
-                name = normalize(subject.name)
-                if name:
-                    by_name[name] = subject
+                key = normalize(subject.name)
+                if key:
+                    by_name[key] = subject
 
         settings = _settings(u)
         created = []
-        skipped = []
 
-        for i, e in enumerate(entries):
-            if not isinstance(e, dict):
-                skipped.append({"index": i, "reason": "Invalid entry"})
-                continue
+        # Only now, after validation, is replace allowed to mutate the DB.
+        if replace:
+            Timetable.query.filter_by(user_id=u).delete(synchronize_session=False)
+            db.session.flush()
 
-            typ = str(e.get("type") or "class").strip().lower()
-            if typ not in {"class", "lab", "break", "free", "library", "activity", "other"}:
-                typ = "class"
-
-            day = str(e.get("day") or "").strip().title()
-            start = str(e.get("start_time") or "").strip()
-            end = str(e.get("end_time") or "").strip()
-
-            if day not in DAYS or not start or not end:
-                skipped.append({"index": i, "reason": "Missing day or time", "entry": e})
-                continue
-
-            try:
-                if _parse_time(start) >= _parse_time(end):
-                    raise ValueError("end before start")
-            except Exception:
-                skipped.append({"index": i, "reason": "Invalid time range", "entry": e})
-                continue
-
-            subject_code = str(e.get("subject_code") or "").strip()
-            subject_name = str(e.get("subject_name") or e.get("label") or "").strip()
-
-            sub = by_code.get(normalize_code(subject_code)) if subject_code else None
-            normalized_name = normalize(subject_name)
-            if not sub and normalized_name:
+        for e in valid_entries:
+            code = e["subject_code"]
+            name = e["subject_name"]
+            sub = by_code.get(normalize_code(code)) if code else None
+            if not sub and name:
+                normalized_name = normalize(name)
                 sub = by_name.get(normalized_name)
-            if not sub and normalized_name:
-                for existing_name, existing_subject in by_name.items():
-                    if normalized_name in existing_name or existing_name in normalized_name:
-                        sub = existing_subject
-                        break
+                if not sub and normalized_name:
+                    for existing_name, existing_subject in by_name.items():
+                        if normalized_name in existing_name or existing_name in normalized_name:
+                            sub = existing_subject
+                            break
 
-            # Do not create duplicate timetable rows when the user scans/saves
-            # the same timetable more than once.
+            # Duplicate protection applies within the user's existing timetable
+            # and within the current import batch.
             duplicate = (
                 Timetable.query
                 .filter_by(
                     user_id=u,
-                    day_of_week=day,
-                    start_time=start,
-                    end_time=end,
-                    subject_code=subject_code,
-                    subject_name=subject_name,
+                    day_of_week=e["day"],
+                    start_time=e["start_time"],
+                    end_time=e["end_time"],
+                    subject_code=code,
+                    subject_name=name,
                 )
                 .first()
             )
-
             if duplicate:
+                skipped.append({"reason": "Duplicate timetable class", "entry": e})
                 continue
 
             t = Timetable(
                 user_id=u,
                 subject_id=sub.id if sub else None,
-                subject_code=subject_code,
-                subject_name=subject_name,
-                day_of_week=day,
-                start_time=start,
-                end_time=end,
-                room=str(e.get("room") or "").strip(),
-                faculty=str(e.get("faculty") or "").strip(),
-                class_type=typ,
-                label=str(e.get("label") or subject_name or subject_code or typ.title()).strip(),
+                subject_code=code,
+                subject_name=name,
+                day_of_week=e["day"],
+                start_time=e["start_time"],
+                end_time=e["end_time"],
+                room=e["room"],
+                faculty=e["faculty"],
+                class_type=e["class_type"],
+                label=e["label"],
                 attendance_mode="MANUAL",
                 radius=settings.default_radius,
             )
             db.session.add(t)
             created.append(t)
+
+        if not created:
+            db.session.rollback()
+            return jsonify({
+                "message": "No new timetable classes were created. Existing timetable was not changed.",
+                "created": 0,
+                "skipped": len(skipped),
+                "skipped_entries": skipped,
+                "timetables": [],
+            }), 400
 
         db.session.commit()
 
@@ -1099,10 +1456,9 @@ def import_timetable():
 
     except Exception as exc:
         db.session.rollback()
-        print(f"TIMETABLE IMPORT ERROR: {exc}")
+        print(f"TIMETABLE IMPORT ERROR: {exc!r}")
         return jsonify({
-            "message": "Could not save timetable.",
-            "error": str(exc),
+            "message": "Could not save timetable. Existing timetable was not changed.",
         }), 500
 
 
@@ -1442,34 +1798,21 @@ def _call_timetable_vision(
     image_bytes,
     mime,
 ):
-    """
-    Grid-first timetable OCR.
-
-    The previous row-based format allowed the model to lose empty cells and
-    shift later classes into the wrong time. This version extracts the time
-    grid once and returns one subject index for EVERY cell.
-    """
+    """Extract class entries using the times and days visible in the image."""
     cfg = _vision_config()
     api_key = cfg.get("api_key", "").strip()
-    base_url = cfg.get(
-        "base_url", "https://api.groq.com/openai/v1"
-    ).strip().rstrip("/")
+    base_url = cfg.get("base_url", "https://api.groq.com/openai/v1").strip().rstrip("/")
     model = cfg.get("model", "qwen/qwen3.8-27b").strip()
     timeout = max(90, int(cfg.get("timeout", 90)))
 
     if not api_key:
-        raise RuntimeError(
-            "Groq API key is missing. Set AI_API_KEY in backend/.env."
-        )
+        raise RuntimeError("Groq API key is missing. Set AI_API_KEY in backend/.env.")
     if not image_bytes:
         raise RuntimeError("The timetable image is empty.")
     if len(image_bytes) > 20 * 1024 * 1024:
-        raise RuntimeError(
-            "Timetable image is larger than 20 MB. Please upload a smaller image."
-        )
+        raise RuntimeError("Timetable image is larger than 20 MB. Please upload a smaller image.")
 
-    # Local OCR hint: helps Groq read tiny subject codes/faculty names.
-    # The timetable image remains the source of truth.
+    # Optional local OCR hint. It is never treated as the source of truth.
     local_ocr = ""
     if pytesseract is not None:
         try:
@@ -1483,165 +1826,145 @@ def _call_timetable_vision(
             gray = ImageOps.grayscale(img)
             gray = ImageEnhance.Contrast(gray).enhance(1.7)
             gray = gray.filter(ImageFilter.SHARPEN)
-            parts = []
-            for psm in (11, 6):
-                txt = pytesseract.image_to_string(gray, config=f"--psm {psm}")
-                if txt.strip():
-                    parts.append(txt.strip())
-            local_ocr = "\n".join(parts)[:12000]
+            txt = pytesseract.image_to_string(gray, config="--psm 11")
+            local_ocr = txt.strip()[:10000]
         except Exception:
             local_ocr = ""
 
-    encoded_image = base64.b64encode(image_bytes).decode("utf-8")
+    encoded_image = base64.b64encode(image_bytes).decode("ascii")
     image_url = f"data:{mime};base64,{encoded_image}"
 
     prompt = r"""
-Read the ENTIRE timetable image as a GRID.
+Read this timetable image carefully and extract every teaching class and lab.
+Return only JSON. Do not assume a fixed number of weekdays, columns, periods,
+or standard start/end times. Read each period's exact start and end time from
+the image's own time headers, then associate the cell with the correct day by
+following the visible row and column grid lines. Keep blank cells blank; never
+shift later entries to fill them. Inspect every day row and every class cell
+before responding so no visible class is omitted.
 
-A local OCR engine also produced the hint below. It may contain mistakes.
-Use it ONLY to help read tiny text; ALWAYS trust the image position/grid first.
+Rules:
+- Return one entry for each actual scheduled class/lab cell, with day,
+    start_time and end_time in 24-hour HH:MM format.
+- Never substitute preset times or infer a time from the column position.
+- If a time, day, or subject cannot be read reliably, omit that cell rather
+    than inventing a value.
+- Preserve subject code, full subject name, room/lab, and faculty only when
+    visible or explicitly explained by a legend.
+- Mark laboratory sessions as type "lab". A course code ending in L or an
+    explicit lab/laboratory label is a strong lab cue. Do not label a lab as a
+    normal class. Other teaching sessions use type "class".
+- Do not emit lunch, break, free, library, or activity blocks as class entries.
+- Do not create a class from a room number, faculty name, or legend key alone.
+- If one lab spans adjacent periods, return one entry spanning the exact
+    visible start and end times. Do not merge different subjects or gaps.
+- confidence is a best-effort value from 0 to 1; lower it when any field is
+    difficult to read. The user will review every entry before saving.
 
-LOCAL OCR HINT:
-""" + local_ocr + r"""
+Return JSON matching this shape:
+{"entries":[{"day":"Tuesday","start_time":"08:30","end_time":"10:00",
+"subject_code":"24ACSE52L","subject_name":"Computer Networks",
+"type":"lab","room":"Lab 2","faculty":"Name if visible",
+"confidence":0.92}]}
 
-Now follow the exact grid rules below.
+LOCAL OCR HINT (may contain mistakes; use only to cross-check text and times):
+""" + local_ocr
 
-
-Return ONLY JSON. Never return prose or markdown.
-
-IMPORTANT:
-1. First read the TIME column/header. These are the ONLY time slots.
-2. Then read each day column from left to right.
-3. EVERY day array in "g" MUST contain EXACTLY the same number of cells as "t".
-4. One "g" value = one timetable cell at that exact time slot.
-5. Use -1 for an EMPTY, BREAK, FREE, LUNCH, TEA BREAK, or REST cell.
-6. NEVER delete an empty cell and NEVER shift later classes left.
-7. If a class spans multiple time slots, repeat the SAME subject index in each covered slot.
-8. Preserve Monday through Saturday when visible.
-9. Read every visible class/lab/activity. Do not stop after a few rows.
-10. Do not invent text. Unknown room/faculty/code = "".
-11. NEVER create timetable entries for Lunch, Tea Break, Break, Interval, Free Period, or any meal/rest period. Use -1 for those cells.
-12. Times must be 24-hour HHMM.
-
-EXACT compact schema:
-{
-  "t":[["0900","1000"],["1000","1055"],["1055","1145"]],
-  "d":["Mon","Tue","Wed","Thu","Fri","Sat"],
-  "s":[
-    ["CS301","Data Structures","","","class"],
-    ["","Lunch","","","break"]
-  ],
-  "g":[
-    [0,1,-1],
-    [2,2,1],
-    [-1,0,0],
-    [-1,-1,-1],
-    [0,0,1],
-    [-1,-1,-1]
-  ]
-}
-
-Definitions:
-- t = the complete ordered list of visible time slots.
-- d = visible day columns.
-- s = unique [subject_code,subject_name,room,faculty,type].
-- g = one array per day; each array has exactly len(t) integers.
-- type = class | lab | break | free | activity | other.
-- -1 means genuinely empty/unreadable cell; do not shift anything.
-- If the timetable has a merged cell, repeat its subject index for every time slot it covers.
-- Keep subject names short but complete enough to identify the class.
-- Do not output warnings.
-"""
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+                        "entries": {
+                "type": "array",
+                                "minItems": 0,
+                                "maxItems": 300,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                                                "day": {"type": "string"},
+                                                "start_time": {"type": "string"},
+                                                "end_time": {"type": "string"},
+                                                "subject_code": {"type": "string"},
+                                                "subject_name": {"type": "string"},
+                        "type": {"type": "string"},
+                                                "room": {"type": "string"},
+                                                "faculty": {"type": "string"},
+                                                "label": {"type": "string"},
+                                                "confidence": {"type": "number"},
+                    },
+                                        "required": [
+                                                "day", "start_time", "end_time", "subject_code",
+                                                "subject_name", "type", "room", "faculty", "label",
+                                                "confidence",
+                                        ],
+                },
+            },
+        },
+                "required": ["entries"],
+    }
 
     payload = {
         "model": model,
         "messages": [
             {
-                "role": "system",
-                "content": (
-                    "You are NoteDown's grid timetable OCR engine. "
-                    "Return ONLY the compact JSON schema requested."
-                ),
-            },
-            {
                 "role": "user",
                 "content": [
                     {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": image_url},
-                    },
+                    {"type": "image_url", "image_url": {"url": image_url}},
                 ],
-            },
+            }
         ],
         "temperature": 0,
-        "max_completion_tokens": 950,
-        "response_format": {"type": "json_object"},
+        "reasoning_effort": "none",
+        "max_completion_tokens": 6000,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "notedown_timetable_grid",
+                "strict": True,
+                "schema": schema,
+            },
+        },
     }
 
     endpoint = f"{base_url}/chat/completions"
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
-    def make_request():
-        return urllib.request.Request(
+    def request_once():
+        req = urllib.request.Request(
             endpoint,
             data=body,
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {api_key}",
-                "User-Agent": "Mozilla/5.0",
+                "User-Agent": "NoteDown/1.0",
                 "Accept": "application/json",
             },
             method="POST",
         )
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return response.read().decode("utf-8", errors="replace")
 
     raw = ""
     for attempt in range(2):
-        req = make_request()
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as response:
-                raw = response.read().decode("utf-8", errors="replace")
+            raw = request_once()
             break
         except urllib.error.HTTPError as exc:
-            error_body = ""
-            try:
-                error_body = exc.read().decode("utf-8", errors="replace")
-            except Exception:
-                pass
-
-            if exc.code == 403 and "1010" in error_body:
-                raise RuntimeError(
-                    "Groq Vision was blocked by Cloudflare (403 / error 1010)."
-                )
-
+            detail = exc.read().decode("utf-8", errors="replace")[:4000]
             if exc.code == 429 and attempt == 0:
-                retry_seconds = 60.0
-                match = re.search(
-                    r"try again in\s+([0-9]+(?:\.[0-9]+)?)s",
-                    error_body,
-                    flags=re.IGNORECASE,
-                )
+                retry_seconds = 5.0
+                match = re.search(r"try again in\s+([0-9]+(?:\.[0-9]+)?)s", detail, re.I)
                 if match:
                     retry_seconds = float(match.group(1))
-                time.sleep(min(max(retry_seconds + 1.0, 1.0), 65.0))
+                time.sleep(min(max(retry_seconds + 1, 1), 15))
                 continue
-
-            if exc.code == 400 and "json_validate_failed" in error_body:
-                raise RuntimeError(
-                    "Groq could not complete the timetable grid JSON. "
-                    "The image may be too dense for the 1K output-token limit."
-                )
-
-            raise RuntimeError(
-                f"Groq timetable OCR error ({exc.code}): "
-                f"{error_body or exc.reason}"
-            )
+            raise RuntimeError(f"Groq timetable OCR error ({exc.code}): {detail or exc.reason}") from exc
         except urllib.error.URLError as exc:
-            raise RuntimeError(f"Unable to connect to Groq Vision: {exc.reason}")
-        except TimeoutError:
-            raise RuntimeError(
-                "Groq Vision timed out. Please try the timetable image again."
-            )
+            raise RuntimeError(f"Unable to connect to Groq Vision: {exc.reason}") from exc
+        except TimeoutError as exc:
+            raise RuntimeError("Groq Vision timed out. Please try the timetable image again.") from exc
 
     if not raw:
         raise RuntimeError("Groq Vision returned no timetable response.")
@@ -1649,211 +1972,21 @@ Definitions:
     try:
         response_data = json.loads(raw)
         choices = response_data.get("choices") or []
-        if not choices:
-            raise ValueError("no choices")
-        content = (choices[0].get("message") or {}).get("content", "")
+        if choices and choices[0].get("finish_reason") == "length":
+            raise RuntimeError(
+                "Timetable OCR response was truncated. Please scan a clearer or smaller image and try again."
+            )
+        content = (choices[0].get("message") or {}).get("content", "") if choices else ""
         if isinstance(content, list):
-            content = "\n".join(
-                str(x.get("text", ""))
-                for x in content
-                if isinstance(x, dict) and x.get("text")
-            )
-        content = str(content).strip()
-        content = re.sub(r"^\s*```(?:json)?\s*", "", content, flags=re.I)
-        content = re.sub(r"\s*```\s*$", "", content).strip()
-        result = json.loads(content)
+            content = "\n".join(str(x.get("text", "")) for x in content if isinstance(x, dict))
+        result = json.loads(str(content).strip())
+    except RuntimeError:
+        raise
     except Exception as exc:
-        raise RuntimeError(f"Groq Vision returned invalid timetable JSON: {exc}")
+        raise RuntimeError(f"Groq Vision returned invalid timetable JSON: {exc}") from exc
 
-    times = result.get("t") or []
-    days = result.get("d") or []
-    subjects = result.get("s") or []
-    grid = result.get("g") or []
-
-    day_map = {
-        "mon": "Monday", "monday": "Monday",
-        "tue": "Tuesday", "tues": "Tuesday", "tuesday": "Tuesday",
-        "wed": "Wednesday", "weds": "Wednesday", "wednesday": "Wednesday",
-        "thu": "Thursday", "thur": "Thursday", "thurs": "Thursday", "thursday": "Thursday",
-        "fri": "Friday", "friday": "Friday",
-        "sat": "Saturday", "saturday": "Saturday",
-        "sun": "Sunday", "sunday": "Sunday",
-    }
-    type_map = {
-        "class": "class", "c": "class",
-        "lab": "lab", "l": "lab",
-        "break": "break", "b": "break",
-        "free": "free", "f": "free",
-        "activity": "activity", "a": "activity",
-        "other": "other", "o": "other",
-    }
-
-    # Normalize time pairs.
-    normalized_times = []
-    for pair in times:
-        if not isinstance(pair, (list, tuple)) or len(pair) < 2:
-            continue
-        st = str(pair[0] or "").strip()
-        et = str(pair[1] or "").strip()
-        if len(st) == 4 and st.isdigit():
-            st = f"{st[:2]}:{st[2:]}"
-        if len(et) == 4 and et.isdigit():
-            et = f"{et[:2]}:{et[2:]}"
-        try:
-            _parse_time(st)
-            _parse_time(et)
-            if _parse_time(et) > _parse_time(st):
-                normalized_times.append((st, et))
-        except Exception:
-            continue
-
-    if not normalized_times:
-        raise RuntimeError(
-            "No valid time slots were detected in the timetable."
-        )
-
-    # Keep only days we can actually map.
-    normalized_days = []
-    for d in days:
-        raw_day = str(d or "").strip().lower()
-        mapped = day_map.get(raw_day, str(d or "").strip().title())
-        if mapped in DAYS and mapped not in normalized_days:
-            normalized_days.append(mapped)
-
-    if not normalized_days:
-        raise RuntimeError(
-            "No timetable day columns were detected."
-        )
-
-    normalized_subjects = []
-    for subject in subjects:
-        if not isinstance(subject, (list, tuple)):
-            continue
-        vals = list(subject) + ["", "", "", ""]
-        normalized_subjects.append([
-            str(vals[0] or "").strip(),
-            str(vals[1] or "").strip(),
-            str(vals[2] or "").strip(),
-            str(vals[3] or "").strip(),
-            type_map.get(str(vals[4] or "class").strip().lower(), "class"),
-        ])
-
-    if not normalized_subjects:
-        raise RuntimeError(
-            "No timetable subjects were detected."
-        )
-
-    # Build one row per day. Pad ONLY at the end. The prompt prevents middle
-    # omissions by requiring an exact slot count and -1 for empty cells.
-    cleaned_entries = []
-    warnings = []
-
-    for day_index, day in enumerate(normalized_days):
-        raw_cells = (
-            grid[day_index]
-            if day_index < len(grid)
-            and isinstance(grid[day_index], list)
-            else []
-        )
-
-        if len(raw_cells) != len(normalized_times):
-            warnings.append(
-                f"{day}: OCR returned {len(raw_cells)} cells for "
-                f"{len(normalized_times)} time slots."
-            )
-
-        cells = list(raw_cells[:len(normalized_times)])
-        if len(cells) < len(normalized_times):
-            cells.extend([-1] * (len(normalized_times) - len(cells)))
-
-        for slot_index, subject_index_raw in enumerate(cells):
-            try:
-                si = int(subject_index_raw)
-            except Exception:
-                continue
-
-            if si < 0 or si >= len(normalized_subjects):
-                continue
-
-            st, et = normalized_times[slot_index]
-            code, name, room, faculty, entry_type = normalized_subjects[si]
-
-            if not name and not code and entry_type in {"break", "free"}:
-                name = entry_type.title()
-
-            if not name and not code:
-                continue
-
-            # ------------------------------------------------------------
-            # FINAL SAFETY FILTER: exclude break/free periods.
-            blocked_names = {
-                "lunch",
-                "tea break",
-                "break",
-                "interval",
-                "free",
-                "free period",
-                "meal break",
-                "recess",
-                "short break",
-            }
-
-            normalized_name = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
-            normalized_label = re.sub(
-                r"[^a-z0-9]+", " ", (code or "").lower()
-            ).strip()
-
-            is_blocked = (
-                normalized_name in blocked_names
-                or normalized_label in blocked_names
-                or entry_type in {"break", "free"}
-            )
-            if is_blocked:
-                continue
-
-            cleaned_entries.append({
-                "day": day,
-                "start_time": st,
-                "end_time": et,
-                "subject_code": code,
-                "subject_name": name,
-                "room": room,
-                "faculty": faculty,
-                "type": entry_type,
-                "label": name or code or "Class",
-            })
-
-    # Merge adjacent identical cells on the same day. This restores labs and
-    # merged timetable blocks while preserving the actual grid boundaries.
-    merged = []
-    for entry in cleaned_entries:
-        if (
-            merged
-            and merged[-1]["day"] == entry["day"]
-            and merged[-1]["subject_code"].lower() == entry["subject_code"].lower()
-            and merged[-1]["subject_name"].lower() == entry["subject_name"].lower()
-            and merged[-1]["room"].lower() == entry["room"].lower()
-            and merged[-1]["faculty"].lower() == entry["faculty"].lower()
-            and merged[-1]["type"] == entry["type"]
-            and merged[-1]["end_time"] == entry["start_time"]
-        ):
-            merged[-1]["end_time"] = entry["end_time"]
-        else:
-            merged.append(entry)
-
-    day_order = {day: i for i, day in enumerate(DAYS)}
-    merged.sort(
-        key=lambda e: (
-            day_order.get(e["day"], 99),
-            e["start_time"],
-            e["end_time"],
-        )
-    )
-
-    return {
-        "entries": merged,
-        "warnings": warnings,
-    }
+    validated = _validate_vision_entries(result)
+    return validated
 
 def _context_for(
     question,
