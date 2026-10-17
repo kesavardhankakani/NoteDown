@@ -1406,6 +1406,8 @@ export async function importTimetable(
 
       created: number;
 
+      updated: number;
+
       skipped: number;
 
       skipped_entries: any[];

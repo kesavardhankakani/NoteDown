@@ -1421,26 +1421,97 @@ def import_timetable():
                 if key:
                     by_name[key] = subject
 
+        def match_subject(code, name):
+            subject = by_code.get(normalize_code(code)) if code else None
+            if not subject and name:
+                normalized_name = normalize(name)
+                subject = by_name.get(normalized_name)
+                if not subject and normalized_name:
+                    for existing_name, existing_subject in by_name.items():
+                        if normalized_name in existing_name or existing_name in normalized_name:
+                            subject = existing_subject
+                            break
+            return subject
+
+        def update_timetable(timetable, entry, subject):
+            timetable.subject_id = subject.id if subject else None
+            timetable.subject_code = entry["subject_code"]
+            timetable.subject_name = entry["subject_name"]
+            timetable.day_of_week = entry["day"]
+            timetable.start_time = entry["start_time"]
+            timetable.end_time = entry["end_time"]
+            timetable.room = entry["room"]
+            timetable.faculty = entry["faculty"]
+            timetable.class_type = entry["class_type"]
+            timetable.label = entry["label"]
+            timetable.attendance_mode = "MANUAL"
+
         settings = _settings(u)
         created = []
+        updated = []
+        entries_to_import = list(valid_entries)
 
         # Only now, after validation, is replace allowed to mutate the DB.
         if replace:
-            Timetable.query.filter_by(user_id=u).delete(synchronize_session=False)
-            db.session.flush()
+            existing_timetables = Timetable.query.filter_by(user_id=u).all()
+            existing_ids = [item.id for item in existing_timetables]
+            linked_ids = set()
+            if existing_ids:
+                linked_ids = {
+                    timetable_id
+                    for (timetable_id,) in (
+                        db.session.query(Attendance.timetable_id)
+                        .filter(Attendance.timetable_id.in_(existing_ids))
+                        .distinct()
+                        .all()
+                    )
+                }
 
-        for e in valid_entries:
+            unmatched_entries = list(entries_to_import)
+            for timetable in existing_timetables:
+                if timetable.id not in linked_ids:
+                    db.session.delete(timetable)
+                    continue
+
+                match_index = next(
+                    (
+                        index
+                        for index, entry in enumerate(unmatched_entries)
+                        if (
+                            entry["day"] == timetable.day_of_week
+                            and entry["start_time"] == timetable.start_time
+                            and entry["end_time"] == timetable.end_time
+                        )
+                    ),
+                    None,
+                )
+                if match_index is None:
+                    skipped.append({
+                        "reason": "Kept existing class because it has attendance history",
+                        "entry": {
+                            "day": timetable.day_of_week,
+                            "start_time": timetable.start_time,
+                            "end_time": timetable.end_time,
+                            "subject_code": timetable.subject_code,
+                            "subject_name": timetable.subject_name,
+                        },
+                    })
+                    continue
+
+                entry = unmatched_entries.pop(match_index)
+                subject = match_subject(
+                    entry["subject_code"],
+                    entry["subject_name"],
+                )
+                update_timetable(timetable, entry, subject)
+                updated.append(timetable)
+
+            entries_to_import = unmatched_entries
+
+        for e in entries_to_import:
             code = e["subject_code"]
             name = e["subject_name"]
-            sub = by_code.get(normalize_code(code)) if code else None
-            if not sub and name:
-                normalized_name = normalize(name)
-                sub = by_name.get(normalized_name)
-                if not sub and normalized_name:
-                    for existing_name, existing_subject in by_name.items():
-                        if normalized_name in existing_name or existing_name in normalized_name:
-                            sub = existing_subject
-                            break
+            sub = match_subject(code, name)
 
             # Duplicate protection applies within the user's existing timetable
             # and within the current import batch.
@@ -1478,11 +1549,12 @@ def import_timetable():
             db.session.add(t)
             created.append(t)
 
-        if not created:
+        if not created and not updated:
             db.session.rollback()
             return jsonify({
                 "message": "No new timetable classes were created. Existing timetable was not changed.",
                 "created": 0,
+                "updated": 0,
                 "skipped": len(skipped),
                 "skipped_entries": skipped,
                 "timetables": [],
@@ -1493,14 +1565,15 @@ def import_timetable():
         return jsonify({
             "message": "Timetable imported",
             "created": len(created),
+            "updated": len(updated),
             "skipped": len(skipped),
             "skipped_entries": skipped,
-            "timetables": [x.to_dict() for x in created],
+            "timetables": [x.to_dict() for x in [*updated, *created]],
         }), 201
 
     except Exception as exc:
         db.session.rollback()
-        print(f"TIMETABLE IMPORT ERROR: {exc!r}")
+        print(f"TIMETABLE IMPORT ERROR: {exc!r}", flush=True)
         return jsonify({
             "message": "Could not save timetable. Existing timetable was not changed.",
         }), 500

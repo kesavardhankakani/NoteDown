@@ -259,9 +259,11 @@ export default function TimetableScanner({
 
       const importedItems =
         r.timetables || [];
+      const updatedCount = r.updated || 0;
+      const savedCount = r.created + updatedCount;
 
       /*
-       * Backend has successfully created the timetable.
+       * Backend has successfully created or updated timetable entries.
        * Notify the parent so the main timetable UI
        * can refresh immediately.
        */
@@ -269,14 +271,23 @@ export default function TimetableScanner({
         await onImported(importedItems);
       }
 
-      if (r.created > 0) {
-        setMessage(
-          `Successfully imported ${r.created} timetable ${
-            r.created === 1
-              ? "entry"
-              : "entries"
-          }.`
-        );
+      if (savedCount > 0) {
+        const parts: string[] = [];
+        if (r.created > 0) {
+          parts.push(
+            `imported ${r.created} new ${
+              r.created === 1 ? "entry" : "entries"
+            }`
+          );
+        }
+        if (updatedCount > 0) {
+          parts.push(
+            `updated ${updatedCount} existing ${
+              updatedCount === 1 ? "class" : "classes"
+            }`
+          );
+        }
+        setMessage(`Successfully ${parts.join(" and ")}.`);
       } else {
         setMessage(
           "Import completed, but no new timetable entries were created."
@@ -307,7 +318,7 @@ export default function TimetableScanner({
        * Clear the scanner only when at least
        * one timetable entry was successfully saved.
        */
-      if (r.created > 0) {
+      if (savedCount > 0) {
         setEntries([]);
         setMeta({});
         setReplace(false);
@@ -801,5 +812,3 @@ function normalizeDay(v: any): string | null {
 
   return exact[s] || null;
 }
-
-
