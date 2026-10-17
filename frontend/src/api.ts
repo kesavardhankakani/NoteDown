@@ -1,8 +1,29 @@
 import { Capacitor } from "@capacitor/core";
 import { Filesystem, Directory } from "@capacitor/filesystem";
-const RAW_API_URL =
-  import.meta.env.VITE_API_URL ||
+const PRODUCTION_API_URL =
   "https://notedown-api-2026.onrender.com";
+
+/*
+ * Production-safe API selection:
+ *
+ * - Android / Render production builds always use the
+ *   deployed NoteDown backend unless the build is running
+ *   in Vite development mode.
+ * - During local `npm run dev`, VITE_API_URL may be used
+ *   for a local Flask server if you intentionally set it.
+ *
+ * This prevents an accidental localhost URL from being
+ * baked into the deployed Android/production application.
+ */
+const configuredApiUrl =
+  typeof import.meta.env.VITE_API_URL === "string"
+    ? import.meta.env.VITE_API_URL.trim()
+    : "";
+
+const RAW_API_URL =
+  import.meta.env.DEV && configuredApiUrl
+    ? configuredApiUrl
+    : PRODUCTION_API_URL;
 
 const API_URL = RAW_API_URL
   .replace(/\/+$/, "")
@@ -230,7 +251,7 @@ async function request<T = any>(
     );
 
     throw new Error(
-      `Cannot connect to NoteDown server at ${API_URL}. Make sure the Flask backend is running on port 5000.`
+      `Cannot connect to the NoteDown server at ${API_URL}. Please check your internet connection and try again.`
     );
   }
 
@@ -1107,9 +1128,19 @@ export async function autoMarkAttendance(
   return request<{
     message: string;
 
-    record?: AttendanceRecord;
+    active: boolean;
+
+    needs_marking: boolean;
+
+    within_radius?: boolean;
 
     distance_m?: number;
+
+    radius_m?: number;
+
+    accuracy_m?: number | null;
+
+    record?: AttendanceRecord;
 
     summary?: AttendanceSummary[];
   }>(

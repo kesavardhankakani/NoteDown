@@ -5,6 +5,14 @@ from extensions import db
 
 class Attendance(db.Model):
     __tablename__ = "attendance"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "user_id",
+            "timetable_id",
+            "class_date",
+            name="uq_attendance_user_timetable_date",
+        ),
+    )
 
     id = db.Column(
         db.Integer,

@@ -3,8 +3,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+database_url = os.getenv(
+    "DATABASE_URL",
+    "postgresql://postgres:postgres@localhost:5432/notedown",
+)
+
+
 class Config:
-    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", "sqlite:///notedown.db")
+    SQLALCHEMY_DATABASE_URI = database_url
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_pre_ping": True,

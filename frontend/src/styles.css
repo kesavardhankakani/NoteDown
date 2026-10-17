@@ -2540,3 +2540,62 @@
   }
 
 }
+
+/* =========================================================
+   PRODUCTION NAVIGATION + AI SCROLL FIX
+   Added without changing existing feature styles.
+   ========================================================= */
+
+.main.main-ai {
+  min-height: calc(100vh - 70px);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.main.main-ai .page-head {
+  flex: 0 0 auto;
+}
+
+.main.main-ai .ai-chat-page {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  height: auto;
+  overflow: hidden;
+}
+
+.ai-conversation-new {
+  min-height: 0;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+  scrollbar-gutter: stable;
+}
+
+.ai-messages-list,
+.ai-welcome {
+  min-height: max-content;
+}
+
+@media (max-width: 768px) {
+  .main.main-ai {
+    min-height: calc(100dvh - 62px);
+    padding-bottom: 82px;
+  }
+
+  .main.main-ai .ai-chat-page {
+    min-height: 0;
+    height: auto;
+    flex: 1 1 auto;
+  }
+
+  .ai-conversation-new {
+    overflow-y: scroll !important;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+    padding-bottom: 18px;
+  }
+}

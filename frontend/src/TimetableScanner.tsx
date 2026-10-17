@@ -128,24 +128,51 @@ export default function TimetableScanner({
 
       const raw = (t.entries || []) as Entry[];
 
-      const normalizedEntries = raw.map((x) => ({
-        ...x,
-        day: normalizeDay(x.day),
-        start_time: x.start_time || "",
-        end_time: x.end_time || "",
-        subject_code: x.subject_code || "",
-        subject_name: x.subject_name || "",
-        room: x.room || "",
-        faculty: x.faculty || "",
-        type: x.type || "class",
-        label: x.label || "",
-      }));
+      const rejected: string[] = [];
+      const normalizedEntries: Entry[] = [];
+
+      raw.forEach((x: any, index: number) => {
+        const day = normalizeDay(x.day);
+        const type = String(x.type || "class").trim().toLowerCase();
+        const subjectName = String(x.subject_name || "").trim();
+        const subjectCode = String(x.subject_code || "").trim();
+        const blockedName = /^(lunch|tea break|break|interval|free|free period|meal break|recess|short break)$/i.test(subjectName);
+
+        if (!day) {
+          rejected.push(`Entry ${index + 1}: invalid day was ignored.`);
+          return;
+        }
+
+        if (type === "break" || type === "free" || blockedName) {
+          rejected.push(`${day}: ${subjectName || type} was ignored as a non-class period.`);
+          return;
+        }
+
+        if (!x.start_time || !x.end_time || (!subjectName && !subjectCode)) {
+          rejected.push(`${day}: incomplete timetable cell was ignored.`);
+          return;
+        }
+
+        normalizedEntries.push({
+          ...x,
+          day,
+          start_time: String(x.start_time),
+          end_time: String(x.end_time),
+          subject_code: subjectCode,
+          subject_name: subjectName,
+          room: String(x.room || ""),
+          faculty: String(x.faculty || ""),
+          type,
+          label: String(x.label || subjectName || subjectCode),
+        });
+      });
 
       setEntries(normalizedEntries);
       setMeta(t);
 
       setWarnings([
         ...(t.warnings || []),
+        ...rejected,
         ...(t.unrecognized_cells || []).map((x: any) =>
           typeof x === "string"
             ? x
@@ -746,24 +773,33 @@ export default function TimetableScanner({
   );
 }
 
-function normalizeDay(v: any) {
-  const s = String(v || "")
+function normalizeDay(v: any): string | null {
+  const s = String(v ?? "")
     .trim()
     .toLowerCase();
 
-  return (
-    days.find(
-      (d) =>
-        d.toLowerCase() === s
-    ) ||
-    days.find(
-      (d) =>
-        d
-          .toLowerCase()
-          .startsWith(
-            s.slice(0, 3)
-          )
-    ) ||
-    "Monday"
-  );
+  const exact: Record<string, string> = {
+    mon: "Monday",
+    monday: "Monday",
+    tue: "Tuesday",
+    tues: "Tuesday",
+    tuesday: "Tuesday",
+    wed: "Wednesday",
+    weds: "Wednesday",
+    wednesday: "Wednesday",
+    thu: "Thursday",
+    thur: "Thursday",
+    thurs: "Thursday",
+    thursday: "Thursday",
+    fri: "Friday",
+    friday: "Friday",
+    sat: "Saturday",
+    saturday: "Saturday",
+    sun: "Sunday",
+    sunday: "Sunday",
+  };
+
+  return exact[s] || null;
 }
+
+

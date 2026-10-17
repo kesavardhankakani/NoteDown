@@ -1,6 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   BookOpen, Download, FileText, Heart, History, Home, LogIn, LogOut, Menu,
   MessageCircle, Search, Trash2, Upload, User, CalendarCheck, Brain, MoreHorizontal,
@@ -30,6 +30,7 @@ export default function App() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
+  const backHandlerRef = useRef<(() => boolean) | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -40,6 +41,28 @@ export default function App() {
     })();
   }, []);
   useEffect(() => { if (user) void refresh(); }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const handlePopState = () => {
+      if (backHandlerRef.current?.()) {
+        window.history.pushState({ notedownPage: page }, "", window.location.href);
+        return;
+      }
+      setMobileMore(false);
+      const nextPage = window.history.state?.notedownPage as Page | undefined;
+      setPage(nextPage || "home");
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [user, page]);
+
+  function registerBackHandler(handler: (() => boolean) | null) {
+    backHandlerRef.current = handler;
+  }
+
   async function refresh() {
     try {
       const [d, s, r] = await Promise.all([getDepartments(), getSubjects(), getResources()]);
@@ -48,7 +71,12 @@ export default function App() {
   }
   if (boot) return <div className="center-page">Loading NoteDown…</div>;
   if (!user) return <Auth onLogin={u => setUser(normalize(u))} />;
-  const nav = (p: Page) => { setPage(p); setMobileMore(false); document.querySelector(".timetable-editor-form")?.scrollIntoView({ behavior: "smooth", block: "start" }); };
+  const nav = (p: Page) => {
+    setPage(p);
+    setMobileMore(false);
+    window.history.pushState({ notedownPage: p }, "", window.location.href);
+    document.querySelector(".timetable-editor-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
   const logout = () => { clearSession(); setUser(null); setPage("home"); };
   return <div className="app">
     <header className="topbar">
@@ -74,13 +102,13 @@ export default function App() {
         <button onClick={logout} className="mobile-more-item danger-item"><LogOut size={18} />Logout</button>
       </div>}
     </header>
-    <main className="main">
+    <main className={page === "chat" ? "main main-ai" : "main"}>
       {page === "home" && <HomePage user={user} resources={resources} subjects={subjects} nav={nav} />}
       {page === "subjects" && <Subjects departments={departments} subjects={subjects} resources={resources} refresh={refresh} />}
       {page === "resources" && <Resources resources={resources} departments={departments} subjects={subjects} refresh={refresh} />}
       {page === "history" && <HistoryPage />}
-      {page === "chat" && <Chat />}
-      {page === "attendance" && <Attendance />}
+      {page === "chat" && <Chat onBackHandler={registerBackHandler} />}
+      {page === "attendance" && <Attendance onBackHandler={registerBackHandler} />}
       {page === "papers" && <Papers subjects={subjects} />}
       {page === "admin" && user.role === "admin" && <Admin departments={departments} subjects={subjects} resources={resources} refresh={refresh} />}
     </main>
@@ -292,7 +320,7 @@ function HomePage({ user, resources, subjects, nav }: { user: UserData; resource
   return <>
     <section className="hero">
       <div className="hero-copy"><span className="hero-eyebrow">ACADEMIC RESOURCE PLATFORM</span><h1>Welcome back,<br /><em>{user.name}</em></h1><p>Find semester subjects, unit-wise notes, download PDFs, track attendance and study with AI from the files stored in NoteDown.</p><div className="hero-actions"><button className="hero-primary" onClick={() => nav("subjects")}><BookOpen size={18} />Browse Subjects</button><button className="hero-secondary" onClick={() => nav("chat")}><MessageCircle size={18} />Ask Notes AI</button></div></div>
-      <div className="hero-side"><div className="hero-stat"><strong>{subjects.length}</strong><span>Subjects</span></div><div className="hero-stat"><strong>{resources.length}</strong><span>Published notes</span></div><div className="hero-stat"><strong>6</strong><span>Units / subject</span></div></div>
+      <div className="hero-side"><div className="hero-stat"><strong>{subjects.length}</strong><span>Subjects</span></div><div className="hero-stat"><strong>{resources.length}</strong><span>Published notes</span></div><div className="hero-stat"><strong>5</strong><span>Units / subject</span></div></div>
     </section>
     <Section title="Quick access" text="Everything you need, one tap away."><div className="quick-grid">{[["Subjects", "Department → year → semester → units", "subjects", BookOpen], ["Resources", `${resources.length} notes and PDFs`, "resources", FileText], ["Attendance", "Manual or location-assisted", "attendance", CalendarCheck], ["Question Papers", "Practice questions from PDFs", "papers", Brain], ["AI Notes", "Explain from your stored files", "chat", MessageCircle], ["History", "Your downloaded resources", "history", History]].map(([t, d, p, C]: any) => <button className="quick-card" key={p} onClick={() => nav(p)}><span className="quick-icon"><C size={20} /></span><b>{t}</b><span>{d}</span></button>)}</div></Section>
   </>;
@@ -303,9 +331,9 @@ function Subjects({ departments, subjects, resources, refresh }: { departments: 
   const years = useMemo(() => Array.from(new Set(subjects.map(s => s.year))).sort((a, b) => a - b), [subjects]);
   const semesters = useMemo(() => Array.from(new Set(subjects.filter(s => !year || String(s.year) === year).map(s => s.semester))).sort((a, b) => a - b), [subjects, year]);
   const list = useMemo(() => subjects.filter(s => (!d || String(s.department_id) === d) && (!year || String(s.year) === year) && (!sem || String(s.semester) === sem)), [subjects, d, year, sem]);
-  return <><PageHead title="Subjects" text="Choose department, year and semester. Open a subject to see all six unit slots and uploaded notes." />
+  return <><PageHead title="Subjects" text="Choose department, year and semester. Open a subject to see all five unit slots and uploaded notes." />
     <div className="filter-panel"><select value={d} onChange={e => { setD(e.target.value); setOpen(null); }}><option value="">All departments</option>{departments.map(x => <option value={x.id} key={x.id}>{x.name} ({x.code})</option>)}</select><select value={year} onChange={e => { setYear(e.target.value); setSem(""); setOpen(null); }}><option value="">All years</option>{years.map(x => <option value={x} key={x}>Year {x}</option>)}</select><select value={sem} onChange={e => { setSem(e.target.value); setOpen(null); }}><option value="">All semesters</option>{semesters.map(x => <option value={x} key={x}>Semester {x}</option>)}</select><button className="ghost" onClick={() => { setD(""); setYear(""); setSem(""); setOpen(null); void refresh(); }}><RefreshCw size={15} />Refresh</button></div>
-    <div className="subject-list">{list.map(s => { const notes = resources.filter(r => r.subject_id === s.id).sort((a, b) => (a.unit_number ?? 99) - (b.unit_number ?? 99)); return <div className="subject-block" key={s.id}><button className="subject-row" onClick={() => setOpen(open === s.id ? null : s.id)}><span className="subject-icon"><BookOpen size={20} /></span><span className="subject-info"><b>{s.name}</b><small>{s.code} · Year {s.year} · Semester {s.semester}</small></span><span className="subject-count">{notes.length} note{notes.length === 1 ? "" : "s"}<ChevronDown className={open === s.id ? "rotated" : ""} size={18} /></span></button>{open === s.id && <div className="unit-list">{[1, 2, 3, 4, 5, 6].map(u => { const unitNotes = notes.filter(n => n.unit_number === u); return <div className="unit-group" key={u}><div className="unit-title">Unit {u}</div>{unitNotes.length ? unitNotes.map(r => <MiniResource key={r.id} r={r} />) : <div className="unit-empty">No Unit {u} note uploaded yet.</div>}</div>})}</div>}</div>; })}</div>{!list.length && <Empty icon={<BookOpen />} title="No matching subjects" text="Choose another department, year or semester, or ask your admin to add the subject." />}</>;
+    <div className="subject-list">{list.map(s => { const notes = resources.filter(r => r.subject_id === s.id).sort((a, b) => (a.unit_number ?? 99) - (b.unit_number ?? 99)); return <div className="subject-block" key={s.id}><button className="subject-row" onClick={() => setOpen(open === s.id ? null : s.id)}><span className="subject-icon"><BookOpen size={20} /></span><span className="subject-info"><b>{s.name}</b><small>{s.code} · Year {s.year} · Semester {s.semester}</small></span><span className="subject-count">{notes.length} note{notes.length === 1 ? "" : "s"}<ChevronDown className={open === s.id ? "rotated" : ""} size={18} /></span></button>{open === s.id && <div className="unit-list">{[1, 2, 3, 4, 5].map(u => { const unitNotes = notes.filter(n => n.unit_number === u); return <div className="unit-group" key={u}><div className="unit-title">Unit {u}</div>{unitNotes.length ? unitNotes.map(r => <MiniResource key={r.id} r={r} />) : <div className="unit-empty">No Unit {u} note uploaded yet.</div>}</div>})}</div>}</div>; })}</div>{!list.length && <Empty icon={<BookOpen />} title="No matching subjects" text="Choose another department, year or semester, or ask your admin to add the subject." />}</>;
 }
 function MiniResource({ r }: { r: Resource }) { const [busy, setBusy] = useState(false); return <div className="mini-resource"><FileText size={18} /><div><b>{r.title}</b><small>{r.description || "Academic PDF"} · {r.downloads || 0} downloads</small></div><button disabled={busy} onClick={async () => { setBusy(true); try { await downloadResource(r.id, r.file_name || `notedown-${r.id}.pdf`); } catch (e) { alert(e instanceof Error ? e.message : "Download failed"); } finally { setBusy(false); } }}><Download size={15} />{busy ? "Saving…" : "Download"}</button></div>; }
 function Resources({ resources, departments, subjects, refresh }: { resources: Resource[]; departments: Department[]; subjects: Subject[]; refresh: () => Promise<void> }) {
@@ -313,12 +341,12 @@ function Resources({ resources, departments, subjects, refresh }: { resources: R
   useEffect(() => setItems(resources), [resources]);
   async function search() { setBusy(true); try { setItems(await getResources({ search: q, department_id: d ? Number(d) : undefined, year: year ? Number(year) : undefined, semester: sem ? Number(sem) : undefined, unit: unit ? Number(unit) : undefined })); } catch (e) { alert(e instanceof Error ? e.message : "Search failed"); } finally { setBusy(false); } }
   const clear = () => { setQ(""); setD(""); setYear(""); setSem(""); setUnit(""); setItems(resources); void refresh(); };
-  return <><PageHead title="Resources" text="Search by title, subject, description, unit, year, semester and department." /><div className="search-panel"><Search size={19} /><input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === "Enter" && void search()} placeholder="Search notes, subjects, algorithms, units…" /><button onClick={() => void search()} disabled={busy}>{busy ? "Searching…" : "Search"}</button></div><div className="filter-panel resource-filters"><select value={d} onChange={e => setD(e.target.value)}><option value="">Department</option>{departments.map(x => <option value={x.id} key={x.id}>{x.code}</option>)}</select><select value={year} onChange={e => setYear(e.target.value)}><option value="">Year</option>{[1, 2, 3, 4].map(x => <option key={x}>{x}</option>)}</select><select value={sem} onChange={e => setSem(e.target.value)}><option value="">Semester</option>{[1, 2, 3, 4, 5, 6, 7, 8].map(x => <option key={x}>{x}</option>)}</select><select value={unit} onChange={e => setUnit(e.target.value)}><option value="">Unit</option>{[1, 2, 3, 4, 5, 6].map(x => <option key={x}>{x}</option>)}</select><button className="ghost" onClick={clear}>Clear</button></div><div className="resource-list">{items.map(r => <ResourceCard key={r.id} r={r} />)}</div>{!items.length && <Empty icon={<Search />} title="No resources found" text="Try another keyword or clear the filters." />}</>;
+  return <><PageHead title="Resources" text="Search by title, subject, description, unit, year, semester and department." /><div className="search-panel"><Search size={19} /><input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === "Enter" && void search()} placeholder="Search notes, subjects, algorithms, units…" /><button onClick={() => void search()} disabled={busy}>{busy ? "Searching…" : "Search"}</button></div><div className="filter-panel resource-filters"><select value={d} onChange={e => setD(e.target.value)}><option value="">Department</option>{departments.map(x => <option value={x.id} key={x.id}>{x.code}</option>)}</select><select value={year} onChange={e => setYear(e.target.value)}><option value="">Year</option>{[1, 2, 3, 4].map(x => <option key={x}>{x}</option>)}</select><select value={sem} onChange={e => setSem(e.target.value)}><option value="">Semester</option>{[1, 2, 3, 4, 5, 6, 7, 8].map(x => <option key={x}>{x}</option>)}</select><select value={unit} onChange={e => setUnit(e.target.value)}><option value="">Unit</option>{[1, 2, 3, 4, 5].map(x => <option key={x}>{x}</option>)}</select><button className="ghost" onClick={clear}>Clear</button></div><div className="resource-list">{items.map(r => <ResourceCard key={r.id} r={r} />)}</div>{!items.length && <Empty icon={<Search />} title="No resources found" text="Try another keyword or clear the filters." />}</>;
 }
 function ResourceCard({ r }: { r: Resource }) { const [fav, setFav] = useState(false), [busy, setBusy] = useState(false); useEffect(() => { getFavorites().then(x => setFav(x.some(y => y.id === r.id))).catch(() => {}); }, [r.id]); async function toggle() { try { if (fav) await removeFavorite(r.id); else await addFavorite(r.id); setFav(!fav); } catch (e) { alert(e instanceof Error ? e.message : "Favorite failed"); } } return <article className="resource-card"><div className="resource-icon"><FileText size={21} /></div><div className="resource-body"><div className="resource-title"><b>{r.unit_number ? `Unit ${r.unit_number} · ` : ""}{r.title}</b><button className={fav ? "icon-btn liked" : "icon-btn"} onClick={() => void toggle()} aria-label="Favorite"><Heart size={17} fill={fav ? "currentColor" : "none"} /></button></div><p>{r.description || "Academic PDF"}</p><small>{r.subject?.name || r.subject_name || "Subject"} · {r.downloads || 0} downloads</small></div><button className="download-btn" disabled={busy} onClick={async () => { setBusy(true); try { await downloadResource(r.id, r.file_name || `notedown-${r.id}.pdf`); } catch (e) { alert(e instanceof Error ? e.message : "Download failed"); } finally { setBusy(false); } }}><Download size={16} />{busy ? "Saving…" : "Download"}</button></article>; 
 }
 function HistoryPage() { const [items, setItems] = useState<HistoryItem[]>([]); useEffect(() => { getHistory().then(setItems).catch(() => setItems([])); }, []); return <><PageHead title="Download History" text="Your successful NoteDown PDF downloads." /><div className="history-list">{items.map(x => <div className="history-row" key={x.id}><FileText size={19} /><div><b>{x.resource?.title || "Resource"}</b><small>{x.resource?.subject_name || x.resource?.subject?.name || "Subject"} · {new Date(x.downloaded_at).toLocaleString()}</small></div><span className="history-unit">{x.resource?.unit_number ? `Unit ${x.resource.unit_number}` : "PDF"}</span></div>)}{!items.length && <Empty icon={<History />} title="No downloads yet" text="Download a PDF and it will appear here." />}</div></>; }
-function Chat() {
+function Chat({ onBackHandler }: { onBackHandler: (handler: (() => boolean) | null) => void }) {
   const [q, setQ] = useState("");
   const [messages, setMessages] = useState<
     { role: "user" | "assistant"; content: string }[]
@@ -441,6 +469,25 @@ function Chat() {
     setQ("");
     setSidebarOpen(false);
   }
+
+  const conversationRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    onBackHandler(() => {
+      if (sidebarOpen) {
+        setSidebarOpen(false);
+        return true;
+      }
+      return false;
+    });
+    return () => onBackHandler(null);
+  }, [onBackHandler, sidebarOpen]);
+
+  useEffect(() => {
+    const node = conversationRef.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [messages, busy, sources]);
 
   function copyAnswer(text: string) {
     navigator.clipboard?.writeText(text);
@@ -702,7 +749,7 @@ function Chat() {
           </div>
 
           {/* CONVERSATION */}
-          <div className="ai-conversation-new">
+          <div ref={conversationRef} className="ai-conversation-new">
 
             {!messages.length && !busy ? (
               <div className="ai-welcome">
@@ -896,7 +943,19 @@ function Chat() {
   );
 }
 
-function Attendance() {
+function isNonAttendanceClass(x: Timetable) {
+  const type = String(x.class_type || "class").trim().toLowerCase();
+  const name = String(x.subject_name || x.label || "").trim().toLowerCase();
+  return (
+    ["break", "free", "activity", "library"].includes(type) ||
+    [
+      "lunch", "tea break", "break", "interval", "free",
+      "free period", "meal break", "recess", "short break",
+    ].includes(name)
+  );
+}
+
+function Attendance({ onBackHandler }: { onBackHandler: (handler: (() => boolean) | null) => void }) {
   const [tab, setTab] = useState<"overview" | "timetable" | "mark" | "bunk">("overview");
   const [summary, setSummary] = useState<AttendanceSummary[]>([]);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
@@ -945,9 +1004,21 @@ function Attendance() {
     () =>
       timetable
         .filter((x) => x.day_of_week === todayName)
+        .filter((x) => !isNonAttendanceClass(x))
         .sort((a, b) => a.start_time.localeCompare(b.start_time)),
     [timetable, todayName]
   );
+
+  useEffect(() => {
+    onBackHandler(() => {
+      if (tab !== "overview") {
+        setTab("overview");
+        return true;
+      }
+      return false;
+    });
+    return () => onBackHandler(null);
+  }, [onBackHandler, tab]);
 
   return (
     <>
@@ -1775,6 +1846,7 @@ function MarkAttendance({
     () =>
       items
         .filter((x) => x.day_of_week === dayName)
+        .filter((x) => !isNonAttendanceClass(x))
         .sort((a, b) =>
           a.start_time.localeCompare(b.start_time)
         ),
@@ -1935,7 +2007,39 @@ function MarkAttendance({
           .slice(0, 5),
       });
 
-      setMsg(r.message);
+      if (!r.active) {
+        setMsg(r.message || "This class is not active right now.");
+        return;
+      }
+
+      if (!r.within_radius) {
+        setMsg(r.message || "You are outside the classroom radius.");
+        return;
+      }
+
+      if (!r.needs_marking) {
+        setMsg(r.message || "Attendance is already marked.");
+        await refresh();
+        return;
+      }
+
+      const saved = await markAttendance(
+        selected.subject_id ?? null,
+        "present",
+        date,
+        {
+          mode: "location",
+          latitude: location.latitude,
+          longitude: location.longitude,
+          accuracy: location.accuracy,
+        },
+        selected.id
+      );
+
+      setMsg(
+        saved?.message ||
+          `${selected.subject_name || selected.label || "Class"}: Present marked successfully.`
+      );
       await refresh();
     } catch (e) {
       setMsg(
@@ -2108,7 +2212,7 @@ function MarkAttendance({
           >
             {saving
               ? "Checking…"
-              : "📍 Check classroom and continue"}
+              : "📍 Verify classroom & mark Present"}
           </button>
         )}
 
@@ -2247,7 +2351,7 @@ function Papers({ subjects }: { subjects: Subject[] }) {
 function Admin({ departments, subjects, resources, refresh }: { departments: Department[]; subjects: Subject[]; resources: Resource[]; refresh: () => Promise<void> }) { const [tab, setTab] = useState<"departments" | "subjects" | "resources">("resources"); return <><PageHead title="Admin Dashboard" text="Manage departments, year/semester subjects and unit-wise PDF notes." /><div className="admin-banner"><ShieldCheck size={21} /><div><b>Administrator workspace</b><span>Changes here are reflected immediately for students.</span></div></div><div className="tabs">{(["departments", "subjects", "resources"] as const).map(x => <button className={tab === x ? "active" : ""} key={x} onClick={() => setTab(x)}>{x === "departments" ? "Departments" : x === "subjects" ? "Subjects" : "Unit Notes"}</button>)}</div>{tab === "departments" && <DeptPanel deps={departments} refresh={refresh} />}{tab === "subjects" && <SubPanel deps={departments} subs={subjects} refresh={refresh} />}{tab === "resources" && <ResPanel resources={resources} subjects={subjects} refresh={refresh} />}</>; }
 function DeptPanel({ deps, refresh }: { deps: Department[]; refresh: () => Promise<void> }) { const [name, setName] = useState(""), [code, setCode] = useState(""), [desc, setDesc] = useState(""); return <div className="admin-grid"><form className="card" onSubmit={async e => { e.preventDefault(); try { await createDepartment(name, code, desc); setName(""); setCode(""); setDesc(""); await refresh(); } catch (e) { alert(e instanceof Error ? e.message : "Failed"); } }}><h3>Add department</h3><input placeholder="Department name" value={name} onChange={e => setName(e.target.value)} /><input placeholder="Code e.g. CSE" value={code} onChange={e => setCode(e.target.value.toUpperCase())} /><textarea placeholder="Description" value={desc} onChange={e => setDesc(e.target.value)} /><button className="primary">Create department</button></form><div className="card"><h3>Departments</h3>{deps.map(d => <div className="admin-row" key={d.id}><span><b>{d.name}</b><small>{d.code}</small></span><button className="icon-btn danger" onClick={async () => { if (confirm("Delete department?")) try { await deleteDepartment(d.id); await refresh(); } catch (e) { alert(e instanceof Error ? e.message : "Failed"); } }}><Trash2 size={16} /></button></div>)}</div></div>; }
 function SubPanel({ deps, subs, refresh }: { deps: Department[]; subs: Subject[]; refresh: () => Promise<void> }) { const [n, setN] = useState(""), [c, setC] = useState(""), [sem, setSem] = useState(""), [year, setYear] = useState(""), [dep, setDep] = useState(""); return <div className="admin-grid"><form className="card" onSubmit={async e => { e.preventDefault(); if (!dep || !year || !sem) return alert("Select department, year and semester."); try { await createSubject(n, c, Number(sem), Number(year), Number(dep)); setN(""); setC(""); setSem(""); setYear(""); setDep(""); await refresh(); } catch (e) { alert(e instanceof Error ? e.message : "Failed"); } }}><h3>Add subject</h3><select value={dep} onChange={e => setDep(e.target.value)}><option value="">Department</option>{deps.map(d => <option key={d.id} value={d.id}>{d.name} ({d.code})</option>)}</select><input placeholder="Subject name" value={n} onChange={e => setN(e.target.value)} /><input placeholder="Subject code" value={c} onChange={e => setC(e.target.value.toUpperCase())} /><div className="two"><select value={year} onChange={e => setYear(e.target.value)}><option value="">Year</option>{[1, 2, 3, 4].map(x => <option key={x}>{x}</option>)}</select><select value={sem} onChange={e => setSem(e.target.value)}><option value="">Semester</option>{[1, 2, 3, 4, 5, 6, 7, 8].map(x => <option key={x}>{x}</option>)}</select></div><div className="form-help">Semester 1 and Semester 2 are separate records, and each department/year can have its own subjects.</div><button className="primary">Create subject</button></form><div className="card"><h3>Subjects</h3>{subs.map(s => <div className="admin-row" key={s.id}><span><b>{s.name}</b><small>{s.code} · {s.department_name || "Department"} · Year {s.year} · Sem {s.semester}</small></span><button className="icon-btn danger" onClick={async () => { if (confirm("Delete subject and its notes?")) try { await deleteSubject(s.id); await refresh(); } catch (e) { alert(e instanceof Error ? e.message : "Failed"); } }}><Trash2 size={16} /></button></div>)}</div></div>; }
-function ResPanel({ resources, subjects, refresh }: { resources: Resource[]; subjects: Subject[]; refresh: () => Promise<void> }) { const [t, setT] = useState(""), [desc, setDesc] = useState(""), [sid, setSid] = useState(""), [unit, setUnit] = useState(""), [file, setFile] = useState<File | null>(null), [busy, setBusy] = useState(false); async function up(e: FormEvent) { e.preventDefault(); if (!t || !sid || !file) return alert("Title, subject and PDF are required."); const f = new FormData(); f.append("title", t); f.append("description", desc); f.append("subject_id", sid); f.append("unit_number", unit); f.append("file", file); setBusy(true); try { await uploadResource(f); setT(""); setDesc(""); setSid(""); setUnit(""); setFile(null); await refresh(); alert("PDF uploaded successfully."); } catch (e) { alert(e instanceof Error ? e.message : "Upload failed"); } finally { setBusy(false); } } return <div className="admin-grid"><form className="card" onSubmit={up}><h3>Upload unit note</h3><select value={sid} onChange={e => setSid(e.target.value)}><option value="">Subject</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name} · Y{s.year} S{s.semester}</option>)}</select><select value={unit} onChange={e => setUnit(e.target.value)}><option value="">Unit number</option>{[1, 2, 3, 4, 5, 6].map(x => <option key={x}>{x}</option>)}</select><input placeholder="Note title" value={t} onChange={e => setT(e.target.value)} /><textarea placeholder="Description" value={desc} onChange={e => setDesc(e.target.value)} /><input type="file" accept=".pdf,application/pdf" onChange={e => setFile(e.target.files?.[0] || null)} /><div className="form-help">Upload each unit separately when possible. AI Notes and Question Paper Lab read these PDFs.</div><button className="primary" disabled={busy}><Upload size={17} />{busy ? "Uploading…" : "Upload PDF"}</button></form><div className="card"><h3>Published unit notes</h3>{resources.map(r => <div className="admin-row" key={r.id}><span><b>{r.unit_number ? `Unit ${r.unit_number}: ` : ""}{r.title}</b><small>{r.subject?.name || r.subject_name || "Subject"} · Y{r.subject?.year || "-"} S{r.subject?.semester || "-"}</small></span><div className="row-actions"><button className="icon-btn" onClick={async () => { const x = prompt("New title", r.title); if (x) try { await renameResource(r.id, x); await refresh(); } catch (e) { alert(e instanceof Error ? e.message : "Failed"); } }}><ExternalLink size={15} /></button><button className="icon-btn danger" onClick={async () => { if (confirm("Delete PDF?")) try { await deleteResource(r.id); await refresh(); } catch (e) { alert(e instanceof Error ? e.message : "Failed"); } }}><Trash2 size={15} /></button></div></div>)}</div></div>; }
+function ResPanel({ resources, subjects, refresh }: { resources: Resource[]; subjects: Subject[]; refresh: () => Promise<void> }) { const [t, setT] = useState(""), [desc, setDesc] = useState(""), [sid, setSid] = useState(""), [unit, setUnit] = useState(""), [file, setFile] = useState<File | null>(null), [busy, setBusy] = useState(false); async function up(e: FormEvent) { e.preventDefault(); if (!t || !sid || !file) return alert("Title, subject and PDF are required."); const f = new FormData(); f.append("title", t); f.append("description", desc); f.append("subject_id", sid); f.append("unit_number", unit); f.append("file", file); setBusy(true); try { await uploadResource(f); setT(""); setDesc(""); setSid(""); setUnit(""); setFile(null); await refresh(); alert("PDF uploaded successfully."); } catch (e) { alert(e instanceof Error ? e.message : "Upload failed"); } finally { setBusy(false); } } return <div className="admin-grid"><form className="card" onSubmit={up}><h3>Upload unit note</h3><select value={sid} onChange={e => setSid(e.target.value)}><option value="">Subject</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name} · Y{s.year} S{s.semester}</option>)}</select><select value={unit} onChange={e => setUnit(e.target.value)}><option value="">Unit number</option>{[1, 2, 3, 4, 5].map(x => <option key={x}>{x}</option>)}</select><input placeholder="Note title" value={t} onChange={e => setT(e.target.value)} /><textarea placeholder="Description" value={desc} onChange={e => setDesc(e.target.value)} /><input type="file" accept=".pdf,application/pdf" onChange={e => setFile(e.target.files?.[0] || null)} /><div className="form-help">Upload each unit separately when possible. AI Notes and Question Paper Lab read these PDFs.</div><button className="primary" disabled={busy}><Upload size={17} />{busy ? "Uploading…" : "Upload PDF"}</button></form><div className="card"><h3>Published unit notes</h3>{resources.map(r => <div className="admin-row" key={r.id}><span><b>{r.unit_number ? `Unit ${r.unit_number}: ` : ""}{r.title}</b><small>{r.subject?.name || r.subject_name || "Subject"} · Y{r.subject?.year || "-"} S{r.subject?.semester || "-"}</small></span><div className="row-actions"><button className="icon-btn" onClick={async () => { const x = prompt("New title", r.title); if (x) try { await renameResource(r.id, x); await refresh(); } catch (e) { alert(e instanceof Error ? e.message : "Failed"); } }}><ExternalLink size={15} /></button><button className="icon-btn danger" onClick={async () => { if (confirm("Delete PDF?")) try { await deleteResource(r.id); await refresh(); } catch (e) { alert(e instanceof Error ? e.message : "Failed"); } }}><Trash2 size={15} /></button></div></div>)}</div></div>; }
 
 function PageHead({ title, text }: { title: string; text: string }) { return <div className="page-head"><span className="eyebrow">NOTEDOWN</span><h1>{title}</h1><p>{text}</p></div>; }
 function Empty({ icon, title, text }: { icon: ReactNode; title: string; text: string }) { return <div className="empty">{icon}<h3>{title}</h3><p>{text}</p></div>; }
