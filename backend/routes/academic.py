@@ -2,6 +2,7 @@ import json
 import math
 import os
 import re
+import secrets
 import time
 import base64
 
@@ -15,7 +16,7 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 import urllib.request
 import urllib.error
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import text, inspect
 
@@ -1353,6 +1354,7 @@ def import_timetable():
         name = str(raw.get("subject_name") or raw.get("label") or "").strip()
         room = str(raw.get("room") or "").strip()
         faculty = str(raw.get("faculty") or "").strip()
+        label = str(raw.get("label") or name or code or "Class").strip()
 
         # Never allow combined day/type garbage from an OCR/UI response.
         if not day:
@@ -1363,6 +1365,28 @@ def import_timetable():
                 raise ValueError
         except Exception:
             skipped.append({"index": i, "reason": "Invalid time range", "entry": raw})
+            continue
+
+        oversized_fields = [
+            field
+            for field, value, limit in (
+                ("subject_code", code, 50),
+                ("subject_name", name, 160),
+                ("room", room, 100),
+                ("faculty", faculty, 160),
+                ("label", label, 160),
+            )
+            if len(value) > limit
+        ]
+        if oversized_fields:
+            skipped.append({
+                "index": i,
+                "reason": (
+                    "Text exceeds the maximum length for: "
+                    + ", ".join(oversized_fields)
+                ),
+                "entry": raw,
+            })
             continue
 
         normalized_name = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
@@ -1383,13 +1407,14 @@ def import_timetable():
             "room": room,
             "faculty": faculty,
             "class_type": typ,
-            "label": str(raw.get("label") or name or code or "Class").strip(),
+            "label": label,
         })
 
     if not valid_entries:
         return jsonify({
             "message": "No valid class entries were found. Existing timetable was not changed.",
             "created": 0,
+            "updated": 0,
             "skipped": len(skipped),
             "skipped_entries": skipped,
             "timetables": [],
@@ -1560,22 +1585,39 @@ def import_timetable():
                 "timetables": [],
             }), 400
 
-        db.session.commit()
-
-        return jsonify({
+        db.session.flush()
+        response = jsonify({
             "message": "Timetable imported",
             "created": len(created),
             "updated": len(updated),
             "skipped": len(skipped),
             "skipped_entries": skipped,
             "timetables": [x.to_dict() for x in [*updated, *created]],
-        }), 201
+        })
+        db.session.commit()
+        return response, 201
 
     except Exception as exc:
         db.session.rollback()
-        print(f"TIMETABLE IMPORT ERROR: {exc!r}", flush=True)
+        original = getattr(exc, "orig", None)
+        diagnostic = getattr(original, "diag", None)
+        sqlstate = (
+            getattr(original, "sqlstate", None)
+            or getattr(original, "pgcode", None)
+        )
+        reference = secrets.token_hex(4)
+        current_app.logger.error(
+            "Timetable import failed: reference=%s exception=%s sqlstate=%s constraint=%s",
+            reference,
+            type(exc).__name__,
+            sqlstate,
+            getattr(diagnostic, "constraint_name", None),
+        )
         return jsonify({
-            "message": "Could not save timetable. Existing timetable was not changed.",
+            "message": (
+                "Could not save timetable. Existing timetable was not changed. "
+                f"Reference: {reference}"
+            ),
         }), 500
 
 
