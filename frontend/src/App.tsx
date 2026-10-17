@@ -968,7 +968,6 @@ function Attendance({ onBackHandler }: { onBackHandler: (handler: (() => boolean
   const [loading, setLoading] = useState(true);
 
   async function load() {
-    setLoading(true);
     try {
       const r = await getAttendance();
       setSummary(r.summary || []);
