@@ -2738,19 +2738,20 @@
 
 .ai-composer-area {
   width: min(980px, calc(100% - 48px));
-  padding: 14px 0 20px;
+  padding: 8px 0 10px;
 }
 
 .ai-composer {
-  padding: 10px;
-  border-radius: 18px;
+  padding: 6px;
+  border-radius: 15px;
 }
 
 .ai-composer textarea {
-  min-height: 50px;
-  padding: 13px 12px;
-  font-size: 16px;
-  line-height: 1.55;
+  min-height: 38px;
+  max-height: 120px;
+  padding: 8px 10px;
+  font-size: 15px;
+  line-height: 1.45;
 }
 
 @media (max-width: 768px) {
@@ -2794,16 +2795,24 @@
   }
 
   .ai-composer-area {
-    padding: 9px 10px calc(10px + env(safe-area-inset-bottom));
+    padding: 5px 8px calc(5px + env(safe-area-inset-bottom));
+  }
+
+  .ai-composer {
+    padding: 5px;
+    border-radius: 14px;
   }
 
   .ai-composer textarea {
-    min-height: 44px;
-    padding: 9px 10px;
-    font-size: 15px;
+    min-height: 34px;
+    max-height: 88px;
+    padding: 6px 8px;
+    font-size: 14px;
   }
 
   .ai-composer-hint {
-    font-size: 10px;
+    margin-top: 3px;
+    font-size: 9px;
+    line-height: 1.2;
   }
 }
