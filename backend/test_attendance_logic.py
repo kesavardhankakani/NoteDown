@@ -1,5 +1,13 @@
 """Dependency-free smoke tests for the attendance math used by NoteDown."""
+import importlib.util
 import math
+import pathlib
+
+module_path = pathlib.Path(__file__).with_name("routes").joinpath("academic.py")
+spec = importlib.util.spec_from_file_location("academic_module", module_path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
 
 def distance_m(lat1, lon1, lat2, lon2):
     r=6371000.0; p1=math.radians(lat1); p2=math.radians(lat2); dp=math.radians(lat2-lat1); dl=math.radians(lon2-lon1)
@@ -15,4 +23,17 @@ assert safe_bunks(18,20,75)==4
 assert required_classes(14,20,75)==4
 assert distance_m(14.0,79.0,14.0,79.0)==0
 assert distance_m(14.0,79.0,14.001,79.0)>100
+
+class ValidClass:
+    class_type = "class"
+    label = "Engineering Mathematics"
+    subject_name = "Engineering Mathematics"
+
+class BreakClass:
+    class_type = "break"
+    label = "Lunch"
+    subject_name = "Lunch"
+
+assert module._is_attendance_class(ValidClass()) is True
+assert module._is_attendance_class(BreakClass()) is False
 print("Attendance math smoke tests: PASS")

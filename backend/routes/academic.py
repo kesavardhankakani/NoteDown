@@ -317,6 +317,30 @@ def _normalize_day_name(value):
     return mapping.get(raw, str(value or "").strip().title())
 
 
+def _extract_json_payload(content):
+    if content is None:
+        return None
+
+    text = str(content).strip()
+    if not text:
+        return None
+
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I)
+        text = re.sub(r"\s*```$", "", text, flags=re.S)
+
+    for candidate in re.findall(r"\{.*\}", text, flags=re.S):
+        try:
+            return json.loads(candidate)
+        except Exception:
+            continue
+
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
+
+
 def _validate_vision_grid(payload):
     if not isinstance(payload, dict):
         raise ValueError("OCR response was not a JSON object.")
@@ -364,7 +388,7 @@ def _validate_vision_grid(payload):
         raise ValueError("No timetable subjects were detected.")
 
     if len(grid) != 6:
-        raise ValueError("OCR response must contain exactly 6 day rows.")
+        raise ValueError("OCR response must contain exactly 6 day rows (6 rows expected).")
 
     valid_subject_ids = {int(subject["id"]) for subject in normalized_subjects}
 
@@ -435,7 +459,10 @@ def _validate_vision_entries(payload):
             entry_type = "lab"
 
         normalized_name = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
-        if entry_type in {"break", "free", "library", "activity"} or normalized_name in NON_ATTENDANCE_LABELS:
+        if entry_type in {"break", "free", "library", "activity"}:
+            warnings.append(f"{day} {start}-{end}: non-class period was ignored.")
+            continue
+        if normalized_name in NON_ATTENDANCE_LABELS:
             warnings.append(f"{day} {start}-{end}: non-class period was ignored.")
             continue
 
@@ -458,11 +485,28 @@ def _validate_vision_entries(payload):
             pass
         entries.append(entry)
 
+    deduped = []
+    seen = set()
+    for entry in entries:
+        key = (
+            entry["day"],
+            entry["start_time"],
+            entry["end_time"],
+            entry["subject_code"],
+            entry["subject_name"],
+            entry["room"],
+            entry["faculty"],
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(entry)
+
     day_order = {day: index for index, day in enumerate(DAYS)}
-    entries.sort(key=lambda entry: (day_order[entry["day"]], entry["start_time"], entry["end_time"]))
-    if not entries:
+    deduped.sort(key=lambda entry: (day_order[entry["day"]], entry["start_time"], entry["end_time"]))
+    if not deduped:
         raise ValueError("No valid class entries were detected. Check the image and scan again.")
-    return {"entries": entries, "warnings": warnings}
+    return {"entries": deduped, "warnings": warnings}
 
 
 def _distance_m(lat1, lon1, lat2, lon2):
@@ -1979,7 +2023,11 @@ LOCAL OCR HINT (may contain mistakes; use only to cross-check text and times):
         content = (choices[0].get("message") or {}).get("content", "") if choices else ""
         if isinstance(content, list):
             content = "\n".join(str(x.get("text", "")) for x in content if isinstance(x, dict))
-        result = json.loads(str(content).strip())
+        if isinstance(content, dict):
+            content = content.get("text") or content.get("content") or ""
+        result = _extract_json_payload(content)
+        if result is None:
+            raise ValueError("No JSON timetable payload was returned.")
     except RuntimeError:
         raise
     except Exception as exc:
@@ -2188,13 +2236,16 @@ def bunk_plan():
 
         for t in tt:
 
+            if t.day_of_week != day:
+                continue
+
+            if not _is_attendance_class(t):
+                continue
+
             if (
-                t.day_of_week != day
-                or (
-                    subject_ids
-                    and t.subject_id
-                    not in subject_ids
-                )
+                subject_ids
+                and t.subject_id
+                not in subject_ids
             ):
                 continue
 

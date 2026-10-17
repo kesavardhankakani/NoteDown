@@ -86,5 +86,37 @@ def test_validate_vision_entries_preserves_times_and_lab_type():
     assert lecture["start_time"] == "11:15"
 
 
+def test_validate_vision_entries_rejects_non_teaching_blocks_but_keeps_valid_subjects():
+    result = module._validate_vision_entries({
+        "entries": [
+            {
+                "day": "Monday",
+                "start_time": "12:35",
+                "end_time": "13:30",
+                "subject_name": "Lunch",
+                "subject_code": "",
+                "type": "break",
+                "room": "",
+                "faculty": "",
+            },
+            {
+                "day": "Monday",
+                "start_time": "09:15",
+                "end_time": "10:05",
+                "subject_code": "CS101",
+                "subject_name": "Free Electron Theory",
+                "type": "class",
+                "room": "A-201",
+                "faculty": "Dr. Dutta",
+            },
+        ]
+    })
+
+    assert len(result["entries"]) == 1
+    assert result["entries"][0]["subject_name"] == "Free Electron Theory"
+    assert result["entries"][0]["type"] == "class"
+
+
 test_validate_vision_entries_preserves_times_and_lab_type()
+test_validate_vision_entries_rejects_non_teaching_blocks_but_keeps_valid_subjects()
 print("OCR validation smoke tests: PASS")
