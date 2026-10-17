@@ -1572,6 +1572,71 @@
   }
 }
 
+@media (min-width: 801px) and (max-width: 900px) {
+  .topbar-inner {
+    height: 62px;
+    padding: 0 14px;
+    gap: 12px;
+  }
+
+  .desktop-nav,
+  .desktop-user {
+    display: none;
+  }
+
+  .mobile-more-toggle {
+    display: block;
+  }
+
+  .mobile-more-panel {
+    display: grid;
+    padding: 9px 14px 14px;
+    border-top: 1px solid #edf0f3;
+    background: #fff;
+  }
+
+  .mobile-profile {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 3px 11px;
+  }
+
+  .mobile-more-item {
+    border: 0;
+    background: none;
+    color: #344252;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 8px;
+    text-align: left;
+    font-weight: 700;
+  }
+
+  .bottom-nav {
+    position: fixed;
+    display: flex;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    height: 68px;
+    background: rgba(255, 255, 255, 0.98);
+    backdrop-filter: blur(14px);
+    border: 1px solid #dfe5eb;
+    border-radius: 18px;
+    z-index: 150;
+    box-shadow: 0 10px 34px #17212d20;
+  }
+
+  .attendance-overview-grid,
+  .attendance-two-col,
+  .bunk-grid,
+  .bunk-planner-wrap {
+    grid-template-columns: 1fr;
+  }
+}
+
 
 @media (max-width: 480px) {
   .ai-chat-page {
