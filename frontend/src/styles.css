@@ -2670,3 +2670,140 @@
     padding-bottom: 18px;
   }
 }
+
+.main.main-ai {
+  padding: 24px;
+}
+
+.main.main-ai .page-head {
+  margin: 0 0 18px;
+}
+
+.main.main-ai .page-head h1 {
+  font-size: clamp(40px, 4vw, 48px);
+}
+
+.main.main-ai .page-head p {
+  font-size: 16px;
+}
+
+.main.main-ai .ai-chat-page {
+  border: 1px solid #e1e6ec;
+  border-radius: 16px;
+  box-shadow: 0 12px 34px rgba(23, 33, 45, 0.07);
+}
+
+.ai-topbar {
+  min-height: 68px;
+  padding: 12px 20px;
+}
+
+.ai-conversation-new {
+  scrollbar-width: thin;
+  scrollbar-color: #aeb8c4 #f2f4f7;
+}
+
+.ai-conversation-new::-webkit-scrollbar {
+  width: 10px;
+}
+
+.ai-conversation-new::-webkit-scrollbar-track {
+  background: #f2f4f7;
+}
+
+.ai-conversation-new::-webkit-scrollbar-thumb {
+  border: 2px solid #f2f4f7;
+  border-radius: 999px;
+  background: #aeb8c4;
+}
+
+.ai-messages-list {
+  width: min(980px, calc(100% - 48px));
+  padding: 36px 0 44px;
+}
+
+.ai-message-row {
+  gap: 15px;
+  margin-bottom: 32px;
+}
+
+.ai-message-name {
+  font-size: 12px;
+}
+
+.ai-answer {
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.ai-composer-area {
+  width: min(980px, calc(100% - 48px));
+  padding: 14px 0 20px;
+}
+
+.ai-composer {
+  padding: 10px;
+  border-radius: 18px;
+}
+
+.ai-composer textarea {
+  min-height: 50px;
+  padding: 13px 12px;
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+@media (max-width: 768px) {
+  .main.main-ai {
+    padding: 20px 14px 82px;
+  }
+
+  .main.main-ai .page-head {
+    margin-bottom: 16px;
+  }
+
+  .main.main-ai .page-head h1 {
+    font-size: 36px;
+  }
+
+  .main.main-ai .page-head p {
+    font-size: 15px;
+  }
+
+  .main.main-ai .ai-chat-page {
+    border-radius: 14px;
+  }
+
+  .ai-topbar {
+    min-height: 60px;
+    padding: 9px 12px;
+  }
+
+  .ai-messages-list {
+    padding: 26px 0 32px;
+  }
+
+  .ai-message-row {
+    gap: 11px;
+    margin-bottom: 26px;
+  }
+
+  .ai-answer {
+    font-size: 15px;
+    line-height: 1.75;
+  }
+
+  .ai-composer-area {
+    padding: 9px 10px calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .ai-composer textarea {
+    min-height: 44px;
+    padding: 9px 10px;
+    font-size: 15px;
+  }
+
+  .ai-composer-hint {
+    font-size: 10px;
+  }
+}
