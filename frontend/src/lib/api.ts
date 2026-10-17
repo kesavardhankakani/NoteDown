@@ -1,6 +1,6 @@
 const API_URL =
   import.meta.env.VITE_API_URL ||
-  "https://notedown-api-2026.onrender.com";
+  "https://notedown-backend-1cl6.onrender.com";
 
 const API = `${API_URL.replace(/\/+$/, "")}/api`;
 

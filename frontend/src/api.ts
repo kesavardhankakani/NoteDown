@@ -1,7 +1,7 @@
 import { Capacitor } from "@capacitor/core";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 const PRODUCTION_API_URL =
-  "https://notedown-api-2026.onrender.com";
+  "https://notedown-backend-1cl6.onrender.com";
 
 /*
  * Production-safe API selection:

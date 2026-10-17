@@ -53,7 +53,7 @@ If PowerShell blocks `Activate.ps1`, use the direct `venv\\Scripts\\python.exe` 
 Frontend `.env`:
 
 ```env
-VITE_API_URL=https://notedown-api-2026.onrender.com
+VITE_API_URL=https://notedown-backend-1cl6.onrender.com
 ```
 
 Production example:
