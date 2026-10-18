@@ -69,7 +69,50 @@ export default function App() {
       setDepartments(d); setSubjects(s); setResources(r);
     } catch (e) { console.error(e); }
   }
-  if (boot) return <div className="center-page">Loading NoteDown…</div>;
+  if (boot) {
+  return (
+    <div
+      className="notedown-splash"
+      role="status"
+      aria-label="Loading NoteDown"
+    >
+      <div className="splash-orbit splash-orbit-one" />
+      <div className="splash-orbit splash-orbit-two" />
+
+      <div className="splash-content">
+        <div className="splash-logo-wrap">
+          <div className="splash-logo-glow" />
+          <div className="splash-logo">
+            <BookOpen size={42} strokeWidth={1.7} />
+          </div>
+        </div>
+
+        <div className="splash-brand">
+          <span>Note</span>
+          <span className="splash-brand-accent">Down</span>
+        </div>
+
+        <p className="splash-tagline">
+          Your campus. Your knowledge. One place.
+        </p>
+
+        <div className="splash-loader" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
+
+        <p className="splash-loading-text">
+          Preparing your learning space
+        </p>
+      </div>
+
+      <div className="splash-footer">
+        MADE FOR STUDENTS
+      </div>
+    </div>
+  );
+}
   if (!user) return <Auth onLogin={u => setUser(normalize(u))} />;
   const nav = (p: Page) => {
     setPage(p);
